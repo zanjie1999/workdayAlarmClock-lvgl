@@ -1,4 +1,4 @@
-# workdayAlarmClock-lvgl
+# 工作咩闹钟
 
 工作咩闹钟的 LVGL 壳。跑在 TinaLinux / sun5i 这类小内存Linux板子上（fbdev + 静态 musl），
 让Linux也能享受Android App的部分功能
