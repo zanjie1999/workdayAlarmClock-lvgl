@@ -1,0 +1,123 @@
+name: build
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      rns_panel:
+        description: 'RNS 音箱面板预设（aku / 120x160 / 320x240 / 800x1280 / 1024x600）'
+        required: false
+        default: '320x240'
+      rns_rot:
+        description: 'RNS 旋转角度（0 / 90 / 180 / 270）'
+        required: false
+        default: '0'
+
+env:
+  ZIG_VERSION: '0.13.0'
+
+jobs:
+  # ---------------------------------------------------------------- aku
+  # 目标板：TinaLinux / sun5i（ARMv7 + uClibc），fbdev 128x160 面板转 90° 用
+  aku:
+    name: aku (armv7 / musl static / fbdev / 128x160)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # lvgl / freetype 是 submodule：不递归拉取的话 third_party 是空目录，
+          # CMake 的 add_subdirectory 会直接失败。
+          submodules: recursive
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Configure
+        run: |
+          set -eux
+          export WAC_ZIG="$(command -v zig)"
+          cmake -S . -B build-aku -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWAC_BACKEND=fbdev \
+            -DWAC_PANEL=aku \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-arm-musl.cmake
+
+      - name: Build
+        run: cmake --build build-aku -j"$(nproc)"
+
+      - name: Check
+        run: |
+          set -eux
+          file build-aku/wac
+          ls -l build-aku/wac
+          # 静态链接：不能出现 INTERP 段
+          if readelf -l build-aku/wac 2>/dev/null | grep -q INTERP; then
+            echo "::error::wac 不是静态链接"
+            exit 1
+          fi
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: wac-aku-armv7
+          path: build-aku/wac
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- RNS 音箱
+  # MIPS（Ingenic 一类）设备，mipsel + musl 静态。
+  # 面板/旋转是占位默认值，等确认后改 workflow_dispatch 输入或这里的默认值。
+  rns:
+    name: rns (mips / musl static / fbdev)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # lvgl / freetype 是 submodule：不递归拉取的话 third_party 是空目录，
+          # CMake 的 add_subdirectory 会直接失败。
+          submodules: recursive
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Configure
+        env:
+          RNS_PANEL: ${{ github.event.inputs.rns_panel || '320x240' }}
+          RNS_ROT: ${{ github.event.inputs.rns_rot || '0' }}
+        run: |
+          set -eux
+          export WAC_ZIG="$(command -v zig)"
+          cmake -S . -B build-rns -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWAC_BACKEND=fbdev \
+            -DWAC_PANEL="${RNS_PANEL}" \
+            -DWAC_ROT="${RNS_ROT}" \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-mips-musl.cmake
+
+      - name: Build
+        run: cmake --build build-rns -j"$(nproc)"
+
+      - name: Check
+        run: |
+          set -eux
+          file build-rns/wac
+          ls -l build-rns/wac
+          if readelf -l build-rns/wac 2>/dev/null | grep -q INTERP; then
+            echo "::error::wac 不是静态链接"
+            exit 1
+          fi
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: wac-rns-mips
+          path: build-rns/wac
+          if-no-files-found: error
