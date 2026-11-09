@@ -65,18 +65,29 @@ static bool pick_font(char *out, size_t cap, const char *env_name,
     return false;
 }
 
-/* 中文候选：桌面开发时直接吃 Windows 自带字体，真机上优先随程序带的那个 */
+/* 中文候选：桌面开发时直接吃 Windows 自带字体，真机上优先随程序带的那个。
+   顺序原则：雅黑类无衬线 > 其他无衬线中文字体 > 楷体类兜底。
+   rns 音箱的数据分区只有 17MB，塞不下 15MB 的雅黑，所以真机上退到系统
+   自带的 Reeji-CloudKaiTi-GB.ttf（楷体，GB2312 字集，字形没那么好看但字都全）。 */
 static const char *const CJK_CANDIDATES[] = {
     "wac_cjk.ttf",
     "assets/fonts/wac_cjk.ttf",
     "../assets/fonts/wac_cjk.ttf",
     "/usr/share/wac/wac_cjk.ttf",
+    /* 微软雅黑：有就用，字形最好看 */
+    "/usr/share/fonts/msyh.ttf",
+    "/usr/share/fonts/truetype/msyh.ttf",
+    "/usr/share/fonts/truetype/microsoft/msyh.ttf",
+    "msyh.ttc",
+    "C:/Windows/Fonts/msyh.ttc",
+    /* 其他无衬线中文字体 */
     "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
     "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/noto/NotoSansSC-Regular.otf",
     "C:/Windows/Fonts/simhei.ttf",
-    "C:/Windows/Fonts/msyh.ttc",
+    /* 兜底：rns 音箱系统里就这一个中文字体 */
+    "/usr/share/fonts/Reeji-CloudKaiTi-GB.ttf",
 };
 
 static const char *const CLK_CANDIDATES[] = {

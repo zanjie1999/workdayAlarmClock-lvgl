@@ -62,45 +62,59 @@ cmake --build build-arm
 | Artifact | 目标设备 |
 |---|---|
 | `wac-aku-armv7` | aku（sun5i / ARMv7，fbdev 128×160 转 90°） |
-| `wac-rns-mips` | rns 音箱（mipsel / MIPS，面板由触发时填的参数决定） |
+| `wac-rns-mips` | rns 音箱（mipsel / MIPS，fbdev **480×320 横屏不旋转**） |
 
 两个都是**静态链接**的单个可执行文件（CI 里有 `readelf` 断言，出现 `INTERP` 段就判失败），
-下载下来解压直接就是 `wac`，不用装任何运行库。
+下载下来解压直接就是 `wac`，不用装任何运行库。Release 包链接时带 `-s`，
+调试段和符号表都丢掉了（mips 那份 8.6MB → 1.8MB）——设备的 /usr/data 只有 17MB。
 
 ## 部署到设备
+
+两块板的**应用目录不一样**，脚本内容一样（`start.sh` 自己按所在位置推目录）：
+
+| 设备 | 应用目录 | 备注 |
+|---|---|---|
+| aku | `/root/workdayAlarmClock` | 根分区够大，字体跟着程序走 |
+| rns | `/usr/data/workdayAlarmClock` | 数据分区只有 17MB，**不推字体**，用系统自带的楷体 |
 
 解压对应 artifact，得到 `wac`，然后（设备已连 adb）：
 
 ```sh
-# 1. 推可执行文件
-adb push wac /root/workdayAlarmClock/lvgl/wac
-adb shell "chmod 755 /root/workdayAlarmClock/lvgl/wac"
+# 1. 推可执行文件（rns 换/usr/data 前缀）
+adb push wac /usr/data/workdayAlarmClock/lvgl/wac
+adb shell "chmod 755 /usr/data/workdayAlarmClock/lvgl/wac"
 
-# 2. 第一次部署还要推启动脚本和字体
-adb push scripts/start-device.sh /root/workdayAlarmClock/start.sh
-adb push assets/fonts/wac_cjk.ttf     /root/workdayAlarmClock/lvgl/assets/fonts/
-adb push assets/fonts/zyymeclock.ttf  /root/workdayAlarmClock/lvgl/assets/fonts/
-adb shell "chmod 755 /root/workdayAlarmClock/start.sh"
+# 2. 第一次部署还要推启动脚本
+adb push scripts/start-device.sh /usr/data/workdayAlarmClock/start.sh
+adb push scripts/S99workdayAlarmClock /etc/init.d/S99workdayAlarmClock
+adb shell "chmod 755 /usr/data/workdayAlarmClock/start.sh /etc/init.d/S99workdayAlarmClock"
 
-# 3. 启动（脚本会先停掉老的 timeDisplay.sh / pwrKey.sh / volKey.sh 和 Go）
-adb shell sh /root/workdayAlarmClock/start.sh
+# 3. 字体：aku 推 assets/fonts/ 下两个 TTF；rns 不推，走系统 /usr/share/fonts/ 里的楷体
+adb push assets/fonts/wac_cjk.ttf    /root/workdayAlarmClock/lvgl/assets/fonts/
+adb push assets/fonts/zyymeclock.ttf /root/workdayAlarmClock/lvgl/assets/fonts/
+
+# 4. 启动（脚本会先停掉老的 playKey.sh / timeDisplay.sh 和 Go）
+adb shell sh /usr/data/workdayAlarmClock/start.sh
 ```
 
-日志在设备上 `/root/workdayAlarmClock/lvgl/wac.log`：`adb shell tail -f` 直接看。
+日志在设备上 `lvgl/wac.log`：`adb shell tail -f /usr/data/workdayAlarmClock/lvgl/wac.log`。
 
-**开机自启**：在设备的 `/etc/rc.local` 里加一行（`exit 0` 之前），
+**开机自启**：`/etc/init.d/S99workdayAlarmClock` 的 `start` 只做两件事——设背光、
+调 `$BASE/start.sh`。手动跑同一份脚本就能验证开机会不会起来。
 
-```sh
-/root/workdayAlarmClock/start.sh &
-```
+**字体**：`ui_font.c` 里的候选顺序是 雅黑类 → 其他无衬线中文 → 楷体。
+rns 上没推雅黑，会自动落到 `/usr/share/fonts/Reeji-CloudKaiTi-GB.ttf`，
+日志里能看到 `font: cjk = ...` 选的到底是哪个。
 
 LVGL壳需要手动更新，工作咩闹钟本身会自动更新
 
 ## 设备上的几个配置文件
 
-都在 `/root/workdayAlarmClock/lvgl/`，不随代码走（已在 `.gitignore` 里）：
+都在应用目录的 `lvgl/` 下，不随代码走（已在 `.gitignore` 里）：
 
 - `wac_ui.conf` —— 界面选项（显示秒 / 显示电量 / 反转音量 / 24 小时制 / 亮度 / 上次音量），
   首次运行自动生成，也可以直接手写。
-- `wac_keys.conf` —— 按键映射。这块板是 `confirm=116 / prev=115 / next=114`（3 键：电源 + 音量加减）。
+- `wac_keys.conf` —— 按键映射。aku 是 `confirm=116 / prev=115 / next=114`（电源 + 音量加减）；
+  rns 只有 `gpio-keys` 一个输入设备，可用键码是 `103`（播放）/`169`（一键听歌）/`115`（音量+）/`114`（音量-）。
+
 

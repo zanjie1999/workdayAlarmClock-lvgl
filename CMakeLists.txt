@@ -7,12 +7,19 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # ---------------------------------------------------------------- 配置项
 # 后端：sim = Windows/GDI 窗口（开发用），fbdev = 真机 /dev/fb0
 set(WAC_BACKEND "sim" CACHE STRING "sim | fbdev")
-# 面板：aku(128x160) | 120x160 | 320x240 | 800x1280 | 1024x600 ...
-set(WAC_PANEL "aku" CACHE STRING "aku | 120x160 | 320x240 | 800x1280 | 1024x600")
+# 面板：aku(128x160) | 120x160 | 480x320 | 320x240 | 800x1280 | 1024x600 ...
+set(WAC_PANEL "aku" CACHE STRING "aku | 120x160 | 480x320 | 320x240 | 800x1280 | 1024x600")
 # 旋转角度（对物理面板）：0 | 90 | 180 | 270
 set(WAC_ROT "" CACHE STRING "0|90|180|270，留空则用面板预设")
 # 用 FreeType 直接读 TTF（默认开）。关掉会回落到 LVGL 内置 Montserrat，中文不可见。
 option(WAC_FREETYPE "Render text from TTF via FreeType" ON)
+# 设备的数据分区只有 17MB：调试段和符号表运行时完全用不到，直接不产出。
+# 编译期 -g0 从源头上不生成 .debug_*（mips 那份光调试段就 5.1MB），
+# 链接期 -s 再把 .symtab / .strtab 也去掉：8.6MB -> 1.8MB。
+option(WAC_STRIP "Release 下不产调试信息（-g0 + 链接 -s）" ON)
+if(WAC_STRIP AND NOT MSVC AND NOT WAC_BACKEND STREQUAL "sim")
+    add_compile_options(-g0)
+endif()
 
 # ---------------------------------------------------------------- FreeType
 # 只开 TrueType 必需的一部分：关掉 zlib/png/bzip2/brotli/harfbuzz，静态库约 500KB。
@@ -37,6 +44,12 @@ elseif(WAC_PANEL STREQUAL "120x160")
     set(_pw 120)
     set(_ph 160)
     set(_rot 90)
+elseif(WAC_PANEL STREQUAL "480x320")
+    # 目标板：RNS 音箱（MIPS），fb0 实测 480x320p / 32bpp / line 1920。
+    # 横屏直接用，不旋转（yres_virtual 是 640，含第二页，别拿来算行号）
+    set(_pw 480)
+    set(_ph 320)
+    set(_rot 0)
 elseif(WAC_PANEL STREQUAL "320x240")
     set(_pw 320)
     set(_ph 240)
@@ -134,6 +147,10 @@ if(WAC_BACKEND STREQUAL "sim")
     target_link_libraries(wac PRIVATE gdi32 user32)
 else()
     target_link_libraries(wac PRIVATE m pthread)
+    # 静态 musl + -s：只留 loader 需要的段，8.6MB -> 1.8MB
+    if(WAC_STRIP)
+        target_link_options(wac PRIVATE -s)
+    endif()
 endif()
 
 # 警告：自己代码严格，LVGL 头文件不报

@@ -1,0 +1,49 @@
+#!/bin/sh
+# /etc/init.d/S99workdayAlarmClock -- 开机拉起工作咩闹钟（LVGL 外壳）
+#
+# 真正的启停逻辑都在应用目录的 start.sh 里（停掉老的 playKey.sh / Go，
+# 设好环境变量，再后台拉起 wac），这里只管开机时机、背光和 stop 收尾。
+# 手动跑同一份：/usr/data/workdayAlarmClock/start.sh
+#
+# rns 音箱：应用在 /usr/data/workdayAlarmClock（数据分区只有 17MB）
+# aku 板子：应用在 /root/workdayAlarmClock（把 BASE 改掉即可）
+
+BASE=${WAC_BASE:-/usr/data/workdayAlarmClock}
+BACKLIGHT=/sys/class/backlight/pwm-backlight.0/brightness
+
+stop_all() {
+    if [ -f "$BASE/lvgl/wac.pid" ]; then
+        kill "$(cat "$BASE/lvgl/wac.pid")" 2>/dev/null
+        sleep 1
+        rm -f "$BASE/lvgl/wac.pid"
+    fi
+    # wac 退出后 Go 可能还赖着；awk 排除自己那行，免得把 grep/awk 杀掉
+    for pat in playKey.sh workdayAlarmClock-linux; do
+        ps | awk -v pat="$pat" 'NR > 1 && $0 ~ pat && $0 !~ /awk|grep/ {print $1}' |
+            while read -r p; do
+                kill "$p" 2>/dev/null
+            done
+    done
+}
+
+case "$1" in
+  start)
+    [ -w "$BACKLIGHT" ] && echo 20 >"$BACKLIGHT"
+    [ -x "$BASE/start.sh" ] || exit 0
+    cd "$BASE" || exit 1
+    "$BASE/start.sh"
+    ;;
+  stop)
+    stop_all
+    ;;
+  restart|reload)
+    stop_all
+    sleep 1
+    "$0" start
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+    ;;
+esac
+exit 0

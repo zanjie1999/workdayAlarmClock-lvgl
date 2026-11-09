@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       rns_panel:
-        description: 'RNS 音箱面板预设（aku / 120x160 / 320x240 / 800x1280 / 1024x600）'
+        description: 'RNS 音箱面板预设（480x320 / aku / 120x160 / 320x240 / 800x1280 / 1024x600）'
         required: false
-        default: '320x240'
+        default: '480x320'
       rns_rot:
         description: 'RNS 旋转角度（0 / 90 / 180 / 270）'
         required: false
@@ -72,7 +72,7 @@ jobs:
 
   # ---------------------------------------------------------------- RNS 音箱
   # MIPS（Ingenic 一类）设备，mipsel + musl 静态。
-  # 面板/旋转是占位默认值，等确认后改 workflow_dispatch 输入或这里的默认值。
+  # 这块板 fb0 实测 480x320p / 32bpp，横屏直接用、不旋转，所以默认 480x320。
   rns:
     name: rns (mips / musl static / fbdev)
     runs-on: ubuntu-latest
@@ -90,7 +90,7 @@ jobs:
 
       - name: Configure
         env:
-          RNS_PANEL: ${{ github.event.inputs.rns_panel || '320x240' }}
+          RNS_PANEL: ${{ github.event.inputs.rns_panel || '480x320' }}
           RNS_ROT: ${{ github.event.inputs.rns_rot || '0' }}
         run: |
           set -eux
@@ -112,6 +112,11 @@ jobs:
           ls -l build-rns/wac
           if readelf -l build-rns/wac 2>/dev/null | grep -q INTERP; then
             echo "::error::wac 不是静态链接"
+            exit 1
+          fi
+          # 设备数据分区只有 17MB，-s 之后不能再有 .debug_* / .symtab
+          if readelf -S build-rns/wac 2>/dev/null | grep -qE '\.debug_|\.symtab'; then
+            echo "::error::体积没瘦下来：包里还有调试段/符号表"
             exit 1
           fi
 
