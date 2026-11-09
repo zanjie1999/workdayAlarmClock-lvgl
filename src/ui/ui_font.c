@@ -171,6 +171,22 @@ const lv_font_t *ui_font_cjk(int32_t px)
     return f ? f : FALLBACK_FONT;
 }
 
+int32_t ui_font_ink_lift(const lv_font_t *f)
+{
+    if (!f) return 0;
+
+    lv_font_glyph_dsc_t g;
+    /* 取一个汉字当样本：界面文字以中文为主，汉字在行框里的位置最有代表性 */
+    if (!lv_font_get_glyph_dsc(f, &g, 0x4E2D /* 中 */, 0)) return 0;
+
+    /* LVGL 画字形（lv_draw_label.c）：
+           ink_top = label_top + (line_height - base_line) - box_h - ofs_y
+       行框居中时 label_top = 区域中心 - line_height/2，
+       于是「墨迹中心 - 行框中心」= ink_top + box_h/2 - line_height/2。 */
+    const int32_t ink_top = (f->line_height - f->base_line) - (int32_t)g.box_h - (int32_t)g.ofs_y;
+    return ink_top + (int32_t)g.box_h / 2 - f->line_height / 2;
+}
+
 int32_t ui_font_clock_text_w(const lv_font_t *f)
 {
     if (!f) return 0;

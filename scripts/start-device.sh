@@ -34,6 +34,69 @@ kill_pat() {
         done
 }
 
+# ---------------------------------------------------------------- 对时
+# 这块板没有 RTC（hwclock 读 /dev/misc/rtc 直接报不存在），每次上电系统时间
+# 都是 1970-01-01。原先的校时是"小度"干的（duer_linux 里有 NTPReadyEv /
+# ntp_successful 字样），它被停掉之后整机就再没有东西校时了 —— 所以自己补上。
+#
+# 策略：等网卡拿到地址 → 没对上时每 15 秒重试（断网也能自愈）→ 对上以后
+# 每 6 小时再校一次。失败只在成功时写日志，断网一晚上不会把日志刷爆。
+NTP_SERVERS="203.107.6.88 120.25.115.20 ntp.aliyun.com cn.pool.ntp.org"
+NTP_EVERY=21600
+NTP_RETRY=15
+NTP_RETRY_SLOW=300
+
+ntp_once() {
+    for s in $NTP_SERVERS; do
+        if ntpdate -b -t 3 "$s" >/dev/null 2>&1; then
+            echo "[time] ntp ok: $s -> $(date '+%Y-%m-%d %H:%M:%S')"
+            return 0
+        fi
+    done
+    return 1
+}
+
+time_sync_loop() {
+    echo "[time] start, wait for network"
+
+    # 本脚本是 S99 拉起来的，网卡可能还没拿到地址，先等（最多 3 分钟）
+    n=0
+    while [ "$n" -lt 36 ]; do
+        ifconfig wlan0 2>/dev/null | grep -q "inet addr" && break
+        n=$((n + 1))
+        sleep 5
+    done
+
+    synced=0
+    fail=0
+    while :; do
+        # 已经对上过：先睡 6 小时再校准；还没对上就立刻重试
+        [ "$synced" = 1 ] && sleep "$NTP_EVERY"
+
+        if ntp_once; then
+            synced=1
+            fail=0
+        else
+            synced=0
+            fail=$((fail + 1))
+            # 头 40 次（约 10 分钟）勤快点，之后降到 5 分钟一次，别空转
+            if [ "$fail" -lt 40 ]; then
+                sleep "$NTP_RETRY"
+            else
+                sleep "$NTP_RETRY_SLOW"
+            fi
+        fi
+    done
+}
+
+# 本脚本被自己以 __time_sync 调起来时，只跑对时循环
+case "$1" in
+    __time_sync)
+        time_sync_loop
+        exit 0
+        ;;
+esac
+
 # 手动重跑本脚本时，先收掉上一个 wac（它下面挂着 Go，一起走）
 if [ -f "$DIR/wac.pid" ]; then
     kill "$(cat "$DIR/wac.pid")" 2>/dev/null
@@ -71,6 +134,25 @@ export WAC_KEYS_CONF="$DIR/wac_keys.conf"
 # localtime_r 不读那个文件（只认 TZ 环境变量或 /etc/localtime），
 # 不设就会按 UTC 走，时钟整整差 8 小时。POSIX 写法：CST-8 表示 UTC+8。
 export TZ="CST-8"
+
+# 对时循环：后台跑，不挡界面（网卡可能要几十秒才拿到地址）。
+# 用 pid 文件防重复：手工重跑 start.sh 时别再起第二个。
+TIME_LOG="$DIR/time.log"
+if [ -f "$TIME_LOG" ] && [ "$(wc -c <"$TIME_LOG")" -gt 32768 ]; then
+    : >"$TIME_LOG"
+fi
+if command -v ntpdate >/dev/null 2>&1; then
+    if [ -f "$DIR/time.pid" ] && kill -0 "$(cat "$DIR/time.pid")" 2>/dev/null; then
+        :
+    else
+        if command -v setsid >/dev/null 2>&1; then
+            setsid sh "$0" __time_sync </dev/null >>"$TIME_LOG" 2>&1 &
+        else
+            nohup sh "$0" __time_sync </dev/null >>"$TIME_LOG" 2>&1 &
+        fi
+        echo $! >"$DIR/time.pid"
+    fi
+fi
 
 # 必须彻底脱离终端会话：
 #   开机时是 init 拉起来的，本来就没有 tty；但手工 `adb shell sh start.sh` 时，

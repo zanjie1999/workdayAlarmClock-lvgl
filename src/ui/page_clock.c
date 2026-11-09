@@ -24,7 +24,6 @@ static lv_obj_t *s_batt;
 static lv_obj_t *s_date;
 static lv_obj_t *s_week;
 static lv_obj_t *s_weather_top;
-static lv_obj_t *s_weather_sub;
 static lv_obj_t *s_time;
 static lv_obj_t *s_mini;
 static lv_obj_t *s_mini_icon;
@@ -295,9 +294,6 @@ static void page_clock_refresh(void)
     lv_label_set_text(s_week, w);
 
     lv_label_set_text(s_weather_top, g_state.weather_ok ? g_state.weather : "--");
-    if (s_weather_sub) {
-        lv_label_set_text(s_weather_sub, g_state.weather_ok ? g_state.weather : "");
-    }
 
     refresh_battery();
     refresh_mini();
@@ -367,8 +363,9 @@ static void build(lv_obj_t *root)
     const int32_t W = WAC_SCR_W;
 
     /* 顶部/底部这些"次要文字"跟着分辨率走：480×320 上以前只有中间的大数字
-       被放大了，日期行和迷你条还停在 16px，跟设置页/播放页一比就显小。 */
-    const int32_t fs_top = tk_pick(16, 16, 20, 22);
+       被放大了，日期行和迷你条还停在 16px，跟设置页/播放页一比就显小。
+       480×320（MEDIUM）用 24，跟设置页列表同一个字号。 */
+    const int32_t fs_top = tk_pick(16, 20, 24, 28);
 
 /* ---------- 顶部状态行 ---------- */
     /* 字号跟底部迷你条对齐。160 宽的屏上这四项 16px 一行放不下，
@@ -524,17 +521,8 @@ static void build(lv_obj_t *root)
     lv_label_set_text(s_time, "00:00:00");
     clock_relayout();
 
-    /* ---------- 天气描述（TINY 放不下，跳过） ---------- */
-    if (g_tk.bp != WAC_BP_TINY) {
-        s_weather_sub = lv_label_create(root);
-        lv_obj_set_style_text_font(s_weather_sub, ui_font_cjk(g_tk.bp == WAC_BP_SMALL ? 16 : 20), 0);
-        lv_obj_set_style_text_color(s_weather_sub, COL_DIM, 0);
-        lv_obj_set_style_text_align(s_weather_sub, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_width(s_weather_sub, W - g_tk.pad_lg);
-        lv_label_set_long_mode(s_weather_sub, LV_LABEL_LONG_DOT);
-        lv_label_set_text(s_weather_sub, "");
-        lv_obj_align(s_weather_sub, LV_ALIGN_TOP_MID, 0, g_tk.sub_top);
-    }
+    /* 天气只在顶部状态行右侧显示一处。原来这里还有一行居中的天气描述，
+       但顶部那格早就能放下天气了，两处同源同文案，等于重复画一遍。 */
 
     /* ---------- 迷你播放条 ---------- */
     s_mini = lv_obj_create(root);

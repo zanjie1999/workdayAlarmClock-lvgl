@@ -39,7 +39,6 @@ void theme_init(void)
         t->status_h  = 18;
         t->clock_top = 18;
         t->clock_h   = 42;
-        t->sub_top   = 60;
         t->mini_top  = 96;
     }
     else if (t->min_dim < 280) {
@@ -48,29 +47,27 @@ void theme_init(void)
         t->status_h  = 30;
         t->clock_top = 30;
         t->clock_h   = 120;
-        t->sub_top   = 150;
         t->mini_top  = 192;
     }
     else {
         /* MEDIUM 及以上：纵向尺寸从屏高算，不能用 min_dim。
            1024×600 这种"宽而矮"的屏 k=2.5，用 k 缩放会让
            clock_top + clock_h 直接超出屏高，大字压到迷你条上。
-           改为：迷你条高度按比例定 → 从下往上留天气行 → 剩下的给大字。 */
+           改为：迷你条高度按比例定，剩下的整段都给大字
+           （天气只在状态行右侧一处，不再单独占一行）。 */
         t->bp        = (t->min_dim < 480) ? WAC_BP_MEDIUM
                      : (t->min_dim < 720) ? WAC_BP_LARGE
                                           : WAC_BP_XL;
         t->show_hint = true;
 
-        const int32_t mini_h    = clamp_i32(t->h * 12 / 100, 36, 96);
-        const int32_t weather_h = clamp_i32(t->h * 8 / 100, 22, 48);
+        const int32_t mini_h = clamp_i32(t->h * 12 / 100, 36, 96);
 
         t->status_h  = clamp_i32(t->h * 7 / 100, 24, 56);
         t->clock_top = t->status_h;
         t->mini_top  = t->h - mini_h;
 
-        t->clock_h = t->mini_top - weather_h - t->clock_top;
+        t->clock_h = t->mini_top - t->clock_top;
         if (t->clock_h < 40) t->clock_h = 40;
-        t->sub_top = t->clock_top + t->clock_h;
     }
 
     WAC_LOG("theme: %dx%d min=%d k=%d bp=%d pad=%d gap=%d clock_top=%d clock_h=%d mini_top=%d",

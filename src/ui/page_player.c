@@ -322,8 +322,11 @@ static void build(lv_obj_t *root)
     const bool    small = (g_tk.bp == WAC_BP_SMALL);
 
     /* ---------- 标题 ---------- */
+    const int32_t    fs_title = tk_pick(16, 20, 24, 28);
+    const lv_font_t *f_title  = ui_font_cjk(fs_title);
+
     s_title = lv_label_create(root);
-    lv_obj_set_style_text_font(s_title, ui_font_cjk(tk_pick(16, 20, 22, 28)), 0);
+    lv_obj_set_style_text_font(s_title, f_title, 0);
     lv_obj_set_style_text_color(s_title, COL_TEXT, 0);
     lv_obj_set_style_text_align(s_title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(s_title, avail);
@@ -331,9 +334,12 @@ static void build(lv_obj_t *root)
     lv_label_set_text(s_title, WAC_DEF_TITLE);
     lv_obj_align(s_title, LV_ALIGN_TOP_MID, 0, g_tk.pad);
 
-    /* ---------- 进度条 ---------- */
-    const int32_t bar_h = tk_pick(3, 4, 6, 6);
-    const int32_t bar_y = g_tk.pad + tk_pick(24, 30, 34, 30);
+    /* ---------- 进度条 ----------
+       以前是"标题顶 + 固定 34px"，跟字号脱钩：标题 22px 时行高就 30，
+       留给进度条的只有 4px，看着贴在一起。改成按标题行高 + 间距算。 */
+    const int32_t bar_h   = tk_pick(3, 4, 6, 6);
+    const int32_t bar_gap = tk_pick(5, 7, 12, 14);
+    const int32_t bar_y   = g_tk.pad + lv_font_get_line_height(f_title) + bar_gap;
     s_bar = lv_bar_create(root);
     lv_obj_remove_style_all(s_bar);
     lv_obj_set_size(s_bar, avail, bar_h);
@@ -349,18 +355,19 @@ static void build(lv_obj_t *root)
     lv_bar_set_value(s_bar, 0, LV_ANIM_OFF);
     make_cursor(s_bar, avail, bar_h);
 
-    /* ---------- 时间文字：小屏也显示（11px），不然"有进度"看不出来 ---------- */
+    /* ---------- 时间文字：小屏也显示（11px），不然"有进度"看不出来 ----------
+       用主文字色，不用 COL_DIM：这两行压在插画壁纸上，暗色底上几乎看不到。 */
     s_pos = lv_label_create(root);
     lv_obj_set_style_text_font(s_pos, ui_font_cjk(tk_pick(11, 14, 14, 18)), 0);
-    lv_obj_set_style_text_color(s_pos, COL_DIM, 0);
+    lv_obj_set_style_text_color(s_pos, COL_TEXT, 0);
     lv_label_set_text(s_pos, "");
-    lv_obj_align(s_pos, LV_ALIGN_TOP_LEFT, g_tk.pad + 1, bar_y + bar_h + 1);
+    lv_obj_align(s_pos, LV_ALIGN_TOP_LEFT, g_tk.pad + 1, bar_y + bar_h + 3);
 
     s_dur = lv_label_create(root);
     lv_obj_set_style_text_font(s_dur, ui_font_cjk(tk_pick(11, 14, 14, 18)), 0);
-    lv_obj_set_style_text_color(s_dur, COL_DIM, 0);
+    lv_obj_set_style_text_color(s_dur, COL_TEXT, 0);
     lv_label_set_text(s_dur, "");
-    lv_obj_align(s_dur, LV_ALIGN_TOP_RIGHT, -g_tk.pad - 1, bar_y + bar_h + 1);
+    lv_obj_align(s_dur, LV_ALIGN_TOP_RIGHT, -g_tk.pad - 1, bar_y + bar_h + 3);
 
     /* ---------- 尺寸 ---------- */
     int32_t bw_side, bw_mid, bh, gap, vol_h, vol_min_w;

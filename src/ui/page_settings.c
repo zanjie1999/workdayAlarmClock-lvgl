@@ -247,6 +247,17 @@ static void on_show(void)
     focus_set_activate(activate_cb);
 }
 
+/* 行内文字按"墨迹"居中。
+   flex 的居中是对"行框"算的，而字体行框上方留白各家不一样：雅黑只差 1px，
+   设备上那个楷体差 6~7px，于是汉字看着"沉"在行底。按字体度量提回来即可。 */
+static void text_vcenter(lv_obj_t *lbl)
+{
+    const lv_font_t *f = lv_obj_get_style_text_font(lbl, 0);
+    const int32_t    d = ui_font_ink_lift(f);
+
+    if (d) lv_obj_set_style_translate_y(lbl, -d, 0);
+}
+
 static lv_obj_t *make_row(lv_obj_t *parent, int idx, int32_t box, int32_t fs, const lv_font_t *f_chk,
                           int32_t row_h)
 {
@@ -287,6 +298,7 @@ static lv_obj_t *make_row(lv_obj_t *parent, int idx, int32_t box, int32_t fs, co
     lv_obj_set_style_text_font(lbl, ui_font_cjk(fs), 0);
     lv_obj_set_style_text_color(lbl, COL_TEXT, 0);
     lv_label_set_text(lbl, OPT_TEXT[idx]);
+    text_vcenter(lbl);
 
     lv_obj_add_event_cb(row, row_event_cb, LV_EVENT_CLICKED, (void *)(intptr_t)idx);
 
@@ -326,6 +338,7 @@ static lv_obj_t *make_action_row(lv_obj_t *parent, int idx, int32_t box, int32_t
     lv_obj_set_style_text_font(lbl, ui_font_cjk(fs), 0);
     lv_obj_set_style_text_color(lbl, COL_TEXT, 0);
     lv_label_set_text(lbl, OPT_TEXT[idx]);
+    text_vcenter(lbl);
 
     lv_obj_t *sp = lv_obj_create(row); /* 撑开，把图标推到右端 */
     lv_obj_remove_style_all(sp);
@@ -371,6 +384,7 @@ static lv_obj_t *make_bright_row(lv_obj_t *parent, int32_t fs, int32_t sl_h, int
     lv_obj_set_style_text_font(lbl, ui_font_cjk(fs), 0);
     lv_obj_set_style_text_color(lbl, COL_TEXT, 0);
     lv_label_set_text(lbl, OPT_TEXT[OPT_BRIGHT]);
+    text_vcenter(lbl);
 
     lv_obj_t *sl = lv_slider_create(row);
     lv_obj_set_height(sl, sl_h);
@@ -404,6 +418,7 @@ static lv_obj_t *make_bright_row(lv_obj_t *parent, int32_t fs, int32_t sl_h, int
     lv_label_set_long_mode(val, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(val, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_text(val, "100");
+    text_vcenter(val); /* Montserrat 查不到汉字度量，会自动跳过，不改动 */
 
     s_brow    = row;
     s_bslider = sl;

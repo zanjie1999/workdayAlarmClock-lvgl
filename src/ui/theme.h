@@ -32,8 +32,7 @@ typedef struct {
     /* 布局骨架 */
     int32_t status_h; /* 顶部日期/天气行高 */
     int32_t clock_top;/* 时间块 y */
-    int32_t clock_h;
-    int32_t sub_top;  /* 天气描述 y */
+    int32_t clock_h;  /* 时间块可用高（状态行下沿 → 迷你条上沿） */
     int32_t mini_top; /* 迷你播放条 y */
 } wac_token_t;
 

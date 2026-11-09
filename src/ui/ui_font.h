@@ -42,6 +42,13 @@ const lv_font_t *ui_font_clock_fit_text(const char *sample, int32_t len,
 /* 当前时钟字体实测宽度（用于锁定 label 宽度，避免跳秒抖动） */
 int32_t ui_font_clock_text_w(const lv_font_t *f);
 
+/* 汉字墨迹在行框里相对中心的下沉量（像素，正数=看着偏下）。
+ *
+ * LVGL 的 flex/align 是按"行框"居中的，但不同字体的 ascent 留白差别很大：
+ * 微软雅黑只偏 1px，设备上那个楷体偏 6~7px，于是列表行里的字看起来"沉"在行底。
+ * 需要视觉居中时给 label 加 translate_y = -ui_font_ink_lift(f)。 */
+int32_t ui_font_ink_lift(const lv_font_t *f);
+
 /* 是否真的用上了 TTF（false = 回落 Montserrat，中文会显示成方块/空白） */
 bool ui_font_has_ttf(void);
 

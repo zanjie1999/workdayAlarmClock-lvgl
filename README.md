@@ -145,6 +145,24 @@ adb shell "rm /usr/data/duer_off && /etc/init.d/S99dueros_device start"
 
 实测在这块 120MB 内存的板子上，关掉后空闲内存从 13MB 涨到 41MB。
 
+## 开机对时（这条板子没有 RTC）
+
+`hwclock` 会直接报 `/dev/misc/rtc: No such file or directory` —— 每次上电系统时间都是
+`1970-01-01`。原来的校时是**小度**干的（`duer_linux` 里有 `NTPReadyEv`、`ntp_successful`
+字样），所以把它关掉之后整机就再没有任何东西校时了，表现为"开机后时间不对"。
+
+`start-device.sh` 里补了一个对时循环（不依赖小度）：
+
+- 等 `wlan0` 拿到地址（最多 3 分钟，S99 拉起脚本时网卡常常还没起来）
+- 没对上时每 15 秒重试（断网恢复后能自愈），连续失败 40 次后降到 5 分钟一次
+- 对上以后每 6 小时再校一次
+- 用 `ntpdate`（设备自带 `/usr/bin/ntpdate`），服务器依次试
+  `203.107.6.88`（ntp.aliyun.com）、`120.25.115.20`、`ntp.aliyun.com`、`cn.pool.ntp.org`
+- 只在成功时写日志 `lvgl/time.log`；进程 pid 在 `lvgl/time.pid`，重复执行 `start.sh`
+  不会起第二个
+
+`start-device.sh __time_sync` 就是这个循环本体，手工排查可以直接跑它。
+
 ## 设备上的几个配置文件
 
 都在应用目录的 `lvgl/` 下，不随代码走（已在 `.gitignore` 里）：
