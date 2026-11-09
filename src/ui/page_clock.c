@@ -48,6 +48,64 @@ static int     s_last_sec = -1;
 
 static const char *WEEK_CN[] = {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
 
+/* 汉字（尤其楷体）在行框里是**偏下**的：行框上方留给 accent 的空档比下方大。
+ * flex 的 CROSS 居中按行框算，于是整行看着往下掉（480×320 上实测偏 5px，
+ * 小屏字小、偏得也少，所以只有大屏明显）。这里把墨迹"提"回行框中心，
+ * 跟设置页 text_vcenter() 是同一套算法（ui_font_ink_lift）。
+ * 用 translate_y 而不是改对齐偏移：不动布局，切字体也不会把容器撑大。
+ *
+ * 度量取 label **自己的第一个字**：图标用的是内置符号字体，em 框跟汉字不一样，
+ * 统一按'中'算会把图标提过头。 */
+/* 取 UTF-8 串的第一个码点（label 文本里第一个字就是最典型的那个字形）。
+   只处理 1~4 字节的常规编码，界面文字用不到别的。 */
+static uint32_t first_codepoint(const char *s)
+{
+    if (!s || !*s) return 0;
+
+    const unsigned char *p = (const unsigned char *)s;
+
+    if (p[0] < 0x80) return p[0];
+    if ((p[0] & 0xE0) == 0xC0 && p[1]) return ((uint32_t)(p[0] & 0x1F) << 6) | (p[1] & 0x3F);
+    if ((p[0] & 0xF0) == 0xE0 && p[1] && p[2]) {
+        return ((uint32_t)(p[0] & 0x0F) << 12) | ((uint32_t)(p[1] & 0x3F) << 6) | (p[2] & 0x3F);
+    }
+    if ((p[0] & 0xF8) == 0xF0 && p[1] && p[2] && p[3]) {
+        return ((uint32_t)(p[0] & 0x07) << 18) | ((uint32_t)(p[1] & 0x3F) << 12)
+             | ((uint32_t)(p[2] & 0x3F) << 6) | (p[3] & 0x3F);
+    }
+    return p[0];
+}
+
+static void label_vcenter(lv_obj_t *obj)
+{
+    if (!obj) return;
+
+    const lv_font_t *f = lv_obj_get_style_text_font(obj, 0);
+    if (!f) return;
+
+    uint32_t letter = 0x4E2D; /* 中 */
+    if (lv_obj_check_type(obj, &lv_label_class)) {
+        const uint32_t cp = first_codepoint(lv_label_get_text(obj));
+        if (cp) letter = cp;
+    }
+
+    const int32_t d = ui_font_ink_lift_cp(f, letter);
+    if (d) lv_obj_set_style_translate_y(obj, -d, 0);
+}
+
+/* 容器里所有 label 统一提一遍（状态行 r1/r2 的写法是"按行数分两支"，
+ * 逐个加调用容易漏，直接扫子对象） */
+static void lift_labels(lv_obj_t *parent)
+{
+    if (!parent) return;
+
+    const uint32_t n = lv_obj_get_child_count(parent);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *c = lv_obj_get_child(parent, i);
+        if (lv_obj_check_type(c, &lv_label_class)) label_vcenter(c);
+    }
+}
+
 /* 数字墨迹相对行框顶部的偏移。跟 LVGL 内部画字形的算法保持一致（lv_draw_label.c）：
        ink_top = label_top + (line_height - base_line) - box_h - ofs_y
    少减 ofs_y 会差 2~3px，居中就会偏下半个字。取 '0' 的度量即可（数字等高、无下伸部）。 */
@@ -151,6 +209,7 @@ static void refresh_mini(void)
         lv_obj_remove_flag(s_mini, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(s_mini_icon,
                           g_state.state == WAC_ST_PLAYING ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+        label_vcenter(s_mini_icon); /* 播放/暂停两个字形墨迹不一样高，换完重算一次 */
         lv_label_set_text(s_mini_title, g_state.title[0] ? g_state.title : WAC_DEF_TITLE);
     }
     else {
@@ -366,6 +425,15 @@ static void build(lv_obj_t *root)
        被放大了，日期行和迷你条还停在 16px，跟设置页/播放页一比就显小。
        480×320（MEDIUM）用 24，跟设置页列表同一个字号。 */
     const int32_t fs_top = tk_pick(16, 20, 24, 28);
+    /* 底部这条（迷你条 / 提示行 / 音量条共用）的高度，由主题按屏高比例给出；
+       字号不让任何人拍脑袋：墨迹占这条高度的 60%，用字体度量反算像素。
+       480×320 上量出来约 29px（以前写死 24 还小一档），小屏依旧是 16px。 */
+    const int32_t    strip = WAC_SCR_H - g_tk.mini_top;
+    /* 墨迹占这条高度的 2/3：小屏（160×120）本来就是 16px 字、墨迹占 6 成多，
+       看着正好；480×320 以前只有 58%，同一档字就显得小一截。按 2/3 反算，
+       各分辨率的视觉密度一致，屏幕一大字就跟着大。 */
+    int32_t          px_bot = 0;
+    const lv_font_t *f_bot  = ui_font_cjk_fit_ink(strip, 66, &px_bot);
 
 /* ---------- 顶部状态行 ---------- */
     /* 字号跟底部迷你条对齐。160 宽的屏上这四项 16px 一行放不下，
@@ -510,6 +578,10 @@ static void build(lv_obj_t *root)
             lv_label_set_long_mode(s_weather_top, LV_LABEL_LONG_DOT);
             lv_label_set_text(s_weather_top, "--");
         }
+
+        /* 状态行的每个 label 都提一下：不提的话这一行整体比设置页的列表项低 5px */
+        lift_labels(r1);
+        lift_labels(r2);
     }
 
     /* ---------- 时间 ---------- */
@@ -538,21 +610,21 @@ static void build(lv_obj_t *root)
     lv_obj_remove_flag(s_mini, LV_OBJ_FLAG_SCROLLABLE);
 
     s_mini_icon = lv_label_create(s_mini);
-    /* 同上：图标走内置符号字体，不依赖中文字体的符号覆盖 */
-    lv_obj_set_style_text_font(s_mini_icon,
-                               g_tk.bp == WAC_BP_TINY  ? &lv_font_montserrat_14
-                               : g_tk.bp == WAC_BP_SMALL ? &lv_font_montserrat_20
-                                                          : &lv_font_montserrat_28,
-                               0);
+    /* 同上：图标走内置符号字体，不依赖中文字体的符号覆盖。
+       字号跟着同一行的文字反算出来，不再按断点写死 —— 否则文字一大，
+       图标就显小、看着还偏高。 */
+    lv_obj_set_style_text_font(s_mini_icon, ui_font_symbol(px_bot), 0);
     lv_obj_set_style_text_color(s_mini_icon, COL_TEXT, 0);
     lv_label_set_text(s_mini_icon, LV_SYMBOL_PLAY);
+    label_vcenter(s_mini_icon); /* 图标的墨迹同样不在 em 框正中，跟文字一条基线 */
 
     s_mini_title = lv_label_create(s_mini);
-    lv_obj_set_style_text_font(s_mini_title, ui_font_cjk(fs_top), 0);
+    lv_obj_set_style_text_font(s_mini_title, f_bot, 0);
     lv_obj_set_style_text_color(s_mini_title, COL_TEXT, 0);
     lv_obj_set_flex_grow(s_mini_title, 1);
     lv_label_set_long_mode(s_mini_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_label_set_text(s_mini_title, WAC_DEF_TITLE);
+    label_vcenter(s_mini_title); /* 不提的话墨迹贴着条底，跟图标也不在一个水平线上 */
 
     lv_obj_add_flag(s_mini, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_mini, LV_OBJ_FLAG_CLICKABLE);
@@ -567,21 +639,24 @@ static void build(lv_obj_t *root)
 
     /* ---------- 底部提示行（ECHO / WEATHERAL 的文字） ----------
        占的就是底部那一条（迷你条的高度），没播放时才出现，两者不会同时在。
-       字号按这条的高度定，宽度用跑马灯兜住长文本。 */
+       字号跟迷你条同一档（原来是 strip-10 再夹到 22，比迷你条还小，切换播放/停止
+       时底部字会突然缩一号）；位置也跟迷你条对齐 —— 行框上下居中到这条里，
+       再把墨迹提回行框中心。 */
     {
-        const int32_t strip = WAC_SCR_H - g_tk.mini_top;
-        int32_t       fs    = strip - 10;
-        if (fs < 12) fs = 12;
-        if (fs > 22) fs = 22;
+        const int32_t    lh = lv_font_get_line_height(f_bot);
 
         s_hint = lv_label_create(root);
-        lv_obj_set_style_text_font(s_hint, ui_font_cjk(fs), 0);
+        lv_obj_set_style_text_font(s_hint, f_bot, 0);
         lv_obj_set_style_text_color(s_hint, COL_TEXT, 0);
         lv_obj_set_style_text_align(s_hint, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(s_hint, W - 6);
         lv_label_set_long_mode(s_hint, LV_LABEL_LONG_SCROLL_CIRCULAR);
         lv_label_set_text(s_hint, "");
-        lv_obj_align(s_hint, LV_ALIGN_BOTTOM_MID, 0, -2);
+
+        int32_t dy = -(strip - lh) / 2; /* BOTTOM 对齐时的上移量：行框落在条中间 */
+        lv_obj_align(s_hint, LV_ALIGN_BOTTOM_MID, 0, dy);
+        label_vcenter(s_hint);
+
         lv_obj_add_flag(s_hint, LV_OBJ_FLAG_HIDDEN);
     }
 
@@ -590,8 +665,7 @@ static void build(lv_obj_t *root)
        高度按这条的高度取一半左右：小屏 32px 的条里放 13px 的轨道，
        滑块头再溢出 2px，焦点/边框都还有地方。 */
     {
-        const int32_t strip = WAC_SCR_H - g_tk.mini_top;
-        int32_t       vol_h = strip / 2 - 3;
+        int32_t vol_h = strip / 2 - 3;
         if (vol_h < 6) vol_h = 6;
         if (vol_h > 26) vol_h = 26;
 

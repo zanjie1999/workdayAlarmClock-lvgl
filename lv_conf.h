@@ -107,6 +107,9 @@
 #define LV_FONT_MONTSERRAT_16 1
 #define LV_FONT_MONTSERRAT_20 1
 #define LV_FONT_MONTSERRAT_28 1
+/* 32：底部迷你条的字号是按屏高反算的（480×320 上 33px），
+   图标得有一档跟得上，否则一行里图标明显比文字小。 */
+#define LV_FONT_MONTSERRAT_32 1
 #define LV_FONT_MONTSERRAT_48 1
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
 

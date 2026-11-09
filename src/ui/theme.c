@@ -7,12 +7,33 @@
  *   大屏    : 单列居中，播放页两栏
  */
 #include "theme.h"
+#include "ui_font.h"
 
 wac_token_t g_tk;
 
 static int32_t clamp_i32(int32_t v, int32_t lo, int32_t hi)
 {
     return v < lo ? lo : (v > hi ? hi : v);
+}
+
+/* 一条"次要文字"（底部迷你条 / 提示行 / 音量条共用）的高度。
+ *
+ * 规则只有两条，都跟分辨率无关：
+ *   1. 屏高的 14% —— 大屏上看着就是一条底栏的比例；
+ *   2. 不小于「最小可读字号的行高 + 上下各一份 pad」—— 小屏上 14% 连一行字都
+ *      装不下（160×120 只有 17px），按比例算出来的字会小到看不清。
+ * 行高是从字体自身度量来的，换雅黑/楷体也跟着变，不用给每种屏写一个数。
+ * 最后再夹一次"不超过屏高 1/3"，防止极扁的屏上底条喧宾夺主。 */
+static int32_t strip_height(const wac_token_t *t)
+{
+    int32_t h = t->h * 14 / 100;
+
+    const int32_t line = lv_font_get_line_height(ui_font_cjk(WAC_FS_MIN_READABLE));
+    const int32_t floor_h = line + t->pad * 2;
+    if (h < floor_h) h = floor_h;
+
+    if (h > t->h / 3) h = t->h / 3;
+    return h;
 }
 
 void theme_init(void)
@@ -38,16 +59,12 @@ void theme_init(void)
         t->show_hint = false;
         t->status_h  = 18;
         t->clock_top = 18;
-        t->clock_h   = 42;
-        t->mini_top  = 96;
     }
     else if (t->min_dim < 280) {
         t->bp        = WAC_BP_SMALL;
         t->show_hint = false;
         t->status_h  = 30;
         t->clock_top = 30;
-        t->clock_h   = 120;
-        t->mini_top  = 192;
     }
     else {
         /* MEDIUM 及以上：纵向尺寸从屏高算，不能用 min_dim。
@@ -60,15 +77,15 @@ void theme_init(void)
                                           : WAC_BP_XL;
         t->show_hint = true;
 
-        const int32_t mini_h = clamp_i32(t->h * 12 / 100, 36, 96);
-
         t->status_h  = clamp_i32(t->h * 7 / 100, 24, 56);
         t->clock_top = t->status_h;
-        t->mini_top  = t->h - mini_h;
-
-        t->clock_h = t->mini_top - t->clock_top;
-        if (t->clock_h < 40) t->clock_h = 40;
     }
+
+    /* 底条与大字区：三档断点共用同一条规则，不再各写一个 mini_top */
+    t->mini_top = t->h - strip_height(t);
+
+    t->clock_h = t->mini_top - t->clock_top;
+    if (t->clock_h < 32) t->clock_h = 32;
 
     WAC_LOG("theme: %dx%d min=%d k=%d bp=%d pad=%d gap=%d clock_top=%d clock_h=%d mini_top=%d",
             (int)t->w, (int)t->h, (int)t->min_dim, (int)t->k, (int)t->bp,

@@ -14,6 +14,10 @@
 
 #include "wac.h"
 
+/* 界面上"次要文字"的最小可读字号：比它再小，远看（音箱放在架子上）就糊了。
+ * 主题用它算底条的下限高度，页面用它兜住按比例算出来的极小值。 */
+#define WAC_FS_MIN_READABLE 14
+
 /* 启动时调用一次（lv_init 之后）。
  * 两个参数都可以传 NULL，表示按 WAC_CJK_TTF / WAC_CLOCK_TTF 环境变量 →
  * 内置路径列表 的顺序去找。找不到也不算致命错误。 */
@@ -45,9 +49,23 @@ int32_t ui_font_clock_text_w(const lv_font_t *f);
 /* 汉字墨迹在行框里相对中心的下沉量（像素，正数=看着偏下）。
  *
  * LVGL 的 flex/align 是按"行框"居中的，但不同字体的 ascent 留白差别很大：
- * 微软雅黑只偏 1px，设备上那个楷体偏 6~7px，于是列表行里的字看起来"沉"在行底。
+ * 微软雅黑只偏 1px，设备上那个楷体偏 6~7px，于是行里的字看起来"沉"在行底。
  * 需要视觉居中时给 label 加 translate_y = -ui_font_ink_lift(f)。 */
 int32_t ui_font_ink_lift(const lv_font_t *f);
+
+/* 同上，但按指定字符的度量算：图标走的是内置符号字体（Montserrat 的私用区），
+ * 跟'中'不是一个 em 框，得用图标自己的字形来算才准。 */
+int32_t ui_font_ink_lift_cp(const lv_font_t *f, uint32_t letter);
+
+/* 按"汉字墨迹占 box_h 的百分比"反算字号（pct<=0 时按 60%）。
+ * box_h 是一整条的高度（底部迷你条 / 提示行），内部拿 32px 量一次字体度量再按
+ * 比例反算像素 —— 不用给每个分辨率写一个字号，换字体也会自动跟着走。
+ * out_px 可传 NULL，返回实际选中的像素值（给同行的图标对齐用）。 */
+const lv_font_t *ui_font_cjk_fit_ink(int32_t box_h, int32_t pct, int32_t *out_px);
+
+/* 内置符号字体（LV_SYMBOL_*）就近取值：位图字体只有固定几档，
+ * 返回 ≤ px 的最大一档，让图标跟着同一行的文字大小走。 */
+const lv_font_t *ui_font_symbol(int32_t px);
 
 /* 是否真的用上了 TTF（false = 回落 Montserrat，中文会显示成方块/空白） */
 bool ui_font_has_ttf(void);
