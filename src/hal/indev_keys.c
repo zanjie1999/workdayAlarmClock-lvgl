@@ -1,5 +1,5 @@
 /**
- * indev_keys.c -- 物理按键扫描器（多 fd poll + 去抖 + 长按）
+ * indev_keys.c -- 物理按键扫描器（多 fd poll + 去抖 + 长按/连发）
  *
  * 真机：poll 所有 /dev/input/event*，只认绑定表里的 code。
  * 模拟器：用 GetAsyncKeyState 轮询几个键，行为完全一致
@@ -11,6 +11,7 @@
 
 #define DEBOUNCE_MS 30
 #define LONG_MS     600
+#define REPEAT_MS   180  /* 进长按后，每隔这么久发一次 KEY_REPEAT（键盘连发那种手感） */
 #define STUCK_MS    5000
 
 typedef struct {
@@ -18,7 +19,8 @@ typedef struct {
     bool down;
     bool long_sent;
     uint32_t down_at;
-    uint32_t up_at; /* 去抖用 */
+    uint32_t up_at;    /* 去抖用 */
+    uint32_t repeat_at; /* 下一次该发 KEY_REPEAT 的时刻 */
 } role_state_t;
 
 static role_state_t s_role[ROLE_COUNT];
@@ -310,7 +312,7 @@ static void evdev_poll(void)
 
 #endif /* WAC_SIM */
 
-/* ------------------------------------------------------------- 长按检查 */
+/* ------------------------------------------------------------- 长按 / 连发 */
 static void check_long(void)
 {
     uint32_t now = wac_millis();
@@ -318,12 +320,24 @@ static void check_long(void)
         role_state_t *r = &s_role[i];
         if (!r->down) continue;
         uint32_t held = now - r->down_at;
-        if (!r->long_sent && held >= LONG_MS) {
-            r->long_sent = true;
-            emit((key_role_t)i, KEY_LONG);
+
+        if (!r->long_sent) {
+            if (held >= LONG_MS) {
+                r->long_sent = true;
+                r->repeat_at = now + REPEAT_MS;
+                emit((key_role_t)i, KEY_LONG);
+            }
         }
+        else if ((int32_t)(now - r->repeat_at) >= 0) {
+            /* 以"现在"为基准重新排期，不用 repeat_at + REPEAT_MS：
+               主循环偶尔卡一下时不会攒出一串补发的重复事件 */
+            r->repeat_at = now + REPEAT_MS;
+            emit((key_role_t)i, KEY_REPEAT);
+        }
+
         if (held > STUCK_MS) {
-            /* 卡键：可能是抬起事件丢了，强制复位不发事件 */
+            /* 卡键：可能是抬起事件丢了，强制复位不发事件。
+               代价是按住超过 5s 就不再连发，当安全阀用。 */
             WAC_LOG("keys: role %d stuck, reset", i);
             r->down      = false;
             r->long_sent = false;

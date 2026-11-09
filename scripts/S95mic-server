@@ -1,0 +1,36 @@
+#!/bin/sh
+#
+# 四麦前端服务（改造版）
+#
+# 四麦阵列只服务于小度的语音唤醒/降噪，时钟程序不用麦克风。
+# 小度被关掉后它没必要继续跑，白占内存（这块板子总共 120MB）。
+# 开关文件与 S99dueros_device 共用：/usr/data/duer_off
+#
+# 恢复小度时一起恢复：rm /usr/data/duer_off && /etc/init.d/S95mic-server start
+
+case "$1" in
+  start)
+    if [ -e /usr/data/duer_off ]; then
+        echo "mic-server: skipped (/usr/data/duer_off)"
+        exit 0
+    fi
+    /usr/bin/four_mic_server.sh &
+    ;;
+  stop)
+    ps | awk 'NR > 1 && $0 ~ /four_mic_(server\.sh|front_end_alg_server)/ && $0 !~ /awk|grep/ {print $1}' |
+        while read -r pid; do
+            kill "$pid" 2>/dev/null
+        done
+    ;;
+  restart|reload)
+    "$0" stop
+    sleep 1
+    "$0" start
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+    ;;
+esac
+
+exit $?

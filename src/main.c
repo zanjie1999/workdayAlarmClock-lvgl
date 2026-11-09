@@ -8,9 +8,8 @@
 #include "page.h"
 #include "theme.h"
 #include "layer_bg.h"
-#include "ui_vol.h"
-#include "ui_alarm.h"
 #include "ui_bright.h"
+#include "ui_alarm.h"
 #include "ui_font.h"
 #include "screen.h"
 #include "indev_keys.h"
@@ -233,8 +232,7 @@ int main(void)
     theme_init();
     bg_init();
     ui_bright_init(); /* 调光遮罩挂 top layer，必须在 display 之后 */
-    ui_vol_init();
-    ui_alarm_init(); /* 响铃遮罩：要盖在调光和音量浮层之上 */
+    ui_alarm_init();  /* 响铃遮罩：要盖在调光遮罩之上 */
     page_init();
 
     keys_init();

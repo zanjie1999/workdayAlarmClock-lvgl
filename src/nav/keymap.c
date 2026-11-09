@@ -4,8 +4,12 @@
  * 模式由"绑到了几个角色"自动推导，规则完全对照需求：
  *   1 键：短按=焦点前移（走完整环）   长按=确定
  *   2 键：方向短=下一个 方向长=上一个   确认短=确定 确认长=返回
- *   3 键：上下短=焦点 上下长=音量±      确认短=确定 确认长=返回
+ *   3 键：上下短=焦点 上下长=连发       确认短=确定 确认长=返回
  *   4 键：同 3 键 + BACK 短=返回上一层，BACK 长=回主页
+ *
+ * "连发"= 按住不放就按 REPEAT_MS 反复触发短按那个动作（键盘连发的手感），
+ * 和长按本身绑定在一起，不再像以前那样另做一套"长按调音量 + 弹浮窗"。
+ * 确定/返回这类一次性动作不跟着连发，避免把开关来回拨。
  *
  * 翻页：焦点走到本页头/尾再继续按，就切到相邻页（时钟 → 播放 → 设置 → 时钟，
  * 反过来同理）。这样即使只有上下两个键也永远走得完所有页面。
@@ -16,7 +20,6 @@
 #include "focus.h"
 #include "page.h"
 #include "cmd.h"
-#include "ui_vol.h"
 #include "ui_alarm.h"
 #include "bind_wizard.h"
 
@@ -95,7 +98,7 @@ void nav_dispatch(key_role_t role, key_kind_t kind)
        那时它应该退回"方向键"的角色，否则短按会变成返回、焦点动不了。 */
     if (role == ROLE_BACK && nav_mode() >= 4) {
         if (kind == KEY_SHORT) nav_back_or_exit_edit();
-        else nav_home();
+        else if (kind == KEY_LONG) nav_home();
         return;
     }
 
@@ -103,17 +106,19 @@ void nav_dispatch(key_role_t role, key_kind_t kind)
         case 1:
             if (role == ROLE_CONFIRM) {
                 if (kind == KEY_SHORT) nav_dir(+1);
-                else focus_activate();
+                else if (kind == KEY_LONG) focus_activate();
+                /* KEY_REPEAT：1 键模式下只有"焦点前移 / 确定"两种含义，
+                   连发会把确定重复触发（比如把开关来回拨），所以忽略 */
             }
             break;
 
         case 2:
             if (role == ROLE_CONFIRM) {
                 if (kind == KEY_SHORT) focus_activate();
-                else nav_back_or_exit_edit();
+                else if (kind == KEY_LONG) nav_back_or_exit_edit();
             }
             else {
-                /* 唯一的方向键：短=下一个，长=上一个 */
+                /* 唯一的方向键：短=下一个，长=上一个；继续持有就按"上一个"连发 */
                 nav_dir(kind == KEY_SHORT ? +1 : -1);
             }
             break;
@@ -125,29 +130,19 @@ void nav_dispatch(key_role_t role, key_kind_t kind)
                 if (kind == KEY_SHORT) {
                     focus_activate();
                 }
-                else {
+                else if (kind == KEY_LONG) {
                     /* 3 键：确认长按=返回；4 键：确认长按=一键（1key） */
                     if (nav_mode() == 3) nav_back_or_exit_edit();
                     else cmd_one_key();
                 }
             }
             else if (role == ROLE_PREV) {
-                if (kind == KEY_SHORT) {
-                    nav_dir(-1);
-                }
-                else {
-                    cmd_vol_step(+1); /* 方向可被设置页"反转音量方向"翻掉 */
-                    ui_vol_poke(g_state.volume);
-                }
+                /* 长按不再是"调音量 + 弹浮窗"：满 600ms 先走一步，
+                   之后每 REPEAT_MS 再来一步，就是短按那个动作在连发 */
+                nav_dir(-1);
             }
             else if (role == ROLE_NEXT) {
-                if (kind == KEY_SHORT) {
-                    nav_dir(+1);
-                }
-                else {
-                    cmd_vol_step(-1);
-                    ui_vol_poke(g_state.volume);
-                }
+                nav_dir(+1);
             }
             break;
     }

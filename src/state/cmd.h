@@ -6,7 +6,7 @@
 
 #include "wac.h"
 
-/* 按键调音量的步长（触摸拖是连续的，这个只管方向键/长按音量键） */
+/* 按键调音量的步长（触摸拖是连续的，这个只管方向键/调节态里的逐步调） */
 #define CMD_VOL_STEP 5
 
 void cmd_play_pause(void);

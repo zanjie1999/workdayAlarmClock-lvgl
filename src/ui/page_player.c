@@ -217,8 +217,7 @@ static void make_cursor(lv_obj_t *bar, int32_t bar_w, int32_t bar_h)
     lv_anim_start(&a);
 }
 
-/* 调节态里的方向键：dir<0（PREV/上/左）= 加，dir>0（NEXT/下/右）= 减，
-   跟 keymap 里"长按 PREV 加音量、长按 NEXT 减音量"的老约定保持一致。
+/* 调节态里的方向键：dir<0（PREV/上/左）= 加，dir>0（NEXT/下/右）= 减。
    设置页勾了"反转音量方向"时，cmd_vol_step 会把这一层方向翻过来。
    dir==0 表示刚进/刚出，只刷显示。 */
 static void vol_edit_step(int dir)

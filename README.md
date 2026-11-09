@@ -108,6 +108,41 @@ rns 上没推雅黑，会自动落到 `/usr/share/fonts/Reeji-CloudKaiTi-GB.ttf`
 
 LVGL壳需要手动更新，工作咩闹钟本身会自动更新
 
+## 关掉 rns 音箱自带的小度（保留联网 + 蓝牙音箱）
+
+这块板子出厂跑着 dueros：`duer_linux` + `ims_service` + 四麦前端服务。它常驻两个独占资源，
+和 LVGL 外壳直接冲突：
+
+- `/dev/fb0` —— 一直在画自己的界面，是「背景残影」的来源；
+- `/dev/snd/pcmC0D0p` —— 以多个 fd **直接打开 hw 设备**，绕过 `/etc/asound.conf` 里的
+  `dmix`/`aeq`，导致 `bluealsa-aplay`（蓝牙放音）和提示音都拿不到声卡。
+
+停掉它不影响另外两件事，它们都是独立的进程/脚本：
+
+| 功能 | 依赖 | 受小度影响 |
+|---|---|---|
+| 联网 | `S40network`(wpa_supplicant) + `udhcpc` + `S80dnsmasq` | 否 |
+| 蓝牙音箱 | `S32rtk_bluetooth` + `bluetoothd` + `S43a2dp-server`(bluealsa / bluealsa-aplay) + `S43auto_agent`(配对) | 否 |
+
+配对记录在 `/var/lib/bluetooth`，蓝牙名取自 `/etc/bluetooth/main.conf` 的 `Name`，
+两者都与小度无关，关掉后手机照样能连、名字也不变。
+
+开关是一块标记文件，改动可回滚：
+
+```sh
+# 关掉小度（立即生效）
+adb shell "touch /usr/data/duer_off && /etc/init.d/S99dueros_device stop"
+
+# 恢复小度
+adb shell "rm /usr/data/duer_off && /etc/init.d/S99dueros_device start"
+```
+
+开机时 `S99dueros_device` / `S95mic-server` 会先看这个标记：存在就只挂 zram swap、直接跳过小度。
+两个脚本的原始版本在设备上留了 `.orig` 备份（`S99dueros_device.orig`、`S95mic-server.orig`），
+仓库里对应的改造版是 `scripts/S99dueros_device` 和 `scripts/S95mic-server`。
+
+实测在这块 120MB 内存的板子上，关掉后空闲内存从 13MB 涨到 41MB。
+
 ## 设备上的几个配置文件
 
 都在应用目录的 `lvgl/` 下，不随代码走（已在 `.gitignore` 里）：

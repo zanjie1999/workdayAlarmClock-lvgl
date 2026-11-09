@@ -1,0 +1,106 @@
+#!/bin/sh
+#
+# dueros 设备启动（改造版）
+#
+# 目的：可以安全地关掉小度，同时保留「联网」和「蓝牙音箱」两件事。
+#
+# 为什么必须加开关：小度常驻两个独占资源
+#   1. /dev/fb0        —— 它一直在画自己的界面，会和 LVGL 外壳抢屏（残影来源）
+#   2. /dev/snd/pcmC0D0p —— 实测它以 5 个 fd 直接打开 hw 设备，绕过 asound.conf
+#      里的 dmix/aeq，导致 bluealsa-aplay（蓝牙放音）和时钟程序的提示音拿不到声卡
+#
+# 关掉它不影响下面这些，它们都是独立的 init 脚本/进程：
+#   联网   : S40network(wpa_supplicant) + udhcpc + S80dnsmasq
+#   蓝牙   : S32rtk_bluetooth + bluetoothd + S43a2dp-server(bluealsa,
+#            bluealsa-aplay) + S43auto_agent(bluez_auto_agent，负责配对)
+#   配对记录在 /usr/data/bluetooth，与本脚本无关，不会被清
+#
+# 开关文件：/usr/data/duer_off
+#   关闭小度：touch /usr/data/duer_off && /etc/init.d/S99dueros_device stop
+#   恢复小度：rm  /usr/data/duer_off  && /etc/init.d/S99dueros_device start
+#
+# 注：zram swap 无论开关都会挂，Go + LVGL 在这块 120MB 内存的板子上需要它。
+
+FLAG=/usr/data/duer_off
+
+# 按命令行关键字收进程，排除 awk/grep/本脚本自己
+kill_pat() {
+    pat="$1"
+    ps | awk -v p="$pat" -v me="$$" \
+        'NR > 1 && $0 ~ p && $0 !~ /awk|grep/ && $1 != me {print $1}' |
+        while read -r pid; do
+            kill "$pid" 2>/dev/null
+        done
+}
+
+setup_swap() {
+    [ -e /sys/block/zram0/disksize ] || return 0
+    if grep -q zram0 /proc/swaps 2>/dev/null; then
+        return 0
+    fi
+    echo 25M > /sys/block/zram0/disksize
+    mkswap /dev/zram0 >/dev/null 2>&1
+    swapon /dev/zram0 2>/dev/null
+}
+
+start_duer() {
+    echo 3 > proc/sys/kernel/printk
+
+    # 小度的内存 cgroup
+    echo "mount{"                             > /tmp/cgconfig.conf
+    echo "    memory  = /tmp/cgroup/memory;" >> /tmp/cgconfig.conf
+    echo "}"                                 >> /tmp/cgconfig.conf
+    cgconfigparser -l /tmp/cgconfig.conf
+    cgcreate -g memory:/duer 2>/dev/null
+
+    cp /duer/appresources/output16000.pcm /data/
+    cp /data/output16000.pcm /data/input16000.pcm
+
+    /usr/bin/ims_service_server.sh &
+    /usr/bin/duer_linux_server.sh &
+}
+
+stop_duer() {
+    # 先停 wrapper：duer_linux_server.sh / ims_service_server.sh 是 while [ 1 ]，
+    # 不停它们，3 秒后小度就又起来了
+    kill_pat "duer_linux_server\.sh"
+    kill_pat "ims_service_server\.sh"
+    sleep 1
+    kill_pat "four_mic_front_end_alg_server"
+    kill_pat "four_mic_server\.sh"
+    kill_pat "duer_linux$"
+    kill_pat "ims_service$"
+    sleep 1
+    # 兜底：还剩就 -9
+    kill_pat "duer_linux$"
+    kill_pat "ims_service$"
+}
+
+case "$1" in
+  start)
+    setup_swap
+
+    if [ -e "$FLAG" ]; then
+        echo "dueros: disabled by $FLAG (wifi / bt-speaker unaffected)"
+        exit 0
+    fi
+
+    start_duer
+    ;;
+
+  stop)
+    stop_duer
+    ;;
+
+  restart|reload)
+    stop_duer
+    [ -e "$FLAG" ] || start_duer
+    ;;
+
+  *)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+    ;;
+esac
+
+exit $?

@@ -72,6 +72,14 @@ export WAC_KEYS_CONF="$DIR/wac_keys.conf"
 # 不设就会按 UTC 走，时钟整整差 8 小时。POSIX 写法：CST-8 表示 UTC+8。
 export TZ="CST-8"
 
-# 脱离 stdin：开机时没有 tty，LVGL 也不读 stdin
-"$DIR/wac" </dev/null >>"$LOG" 2>&1 &
+# 必须彻底脱离终端会话：
+#   开机时是 init 拉起来的，本来就没有 tty；但手工 `adb shell sh start.sh` 时，
+#   wac 和 adb 的那个 pty 在同一个进程组，adb 断开 -> pty 关闭 -> SIGHUP 全组，
+#   wac 会静默死掉（日志里一个字都没有，排查过一次，别再踩）。
+#   setsid 让它单开一个会话，从此和终端无关；没有 setsid 就退回 nohup。
+if command -v setsid >/dev/null 2>&1; then
+    setsid "$DIR/wac" </dev/null >>"$LOG" 2>&1 &
+else
+    nohup "$DIR/wac" </dev/null >>"$LOG" 2>&1 &
+fi
 echo $! >"$DIR/wac.pid"

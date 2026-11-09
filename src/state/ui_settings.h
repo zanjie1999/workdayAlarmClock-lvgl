@@ -12,7 +12,7 @@
 typedef struct {
     bool show_seconds; /* 时钟显示秒；关掉后秒消失、字号会自动变大 */
     bool show_battery; /* 顶部状态行显示电量百分比 */
-    bool vol_reverse;  /* 反转音量键方向（长按 PREV/NEXT 再加/减对调） */
+    bool vol_reverse;  /* 反转音量方向（方向键调音量时加/减对调） */
     bool hour24;       /* 时间 24 小时制；关掉=12 小时制（默认关） */
     int  brightness;   /* 亮度 10..100（硬件背光，没有 sysfs 时不显示这条） */
     int  vol_cache;    /* 上一次的音量：开机第一屏先拿它回显，等 Go 报真值再覆盖 */

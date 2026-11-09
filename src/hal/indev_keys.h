@@ -6,9 +6,10 @@
  *   - lv_evdev_t 只存一个 key/state，不支持多设备；而 AKU 的 3 个键分在
  *     event0(KEY_POWER) 和 event1(VOLUMEUP/VOLUMEDOWN) 两个设备上；
  *   - LV_INDEV_TYPE_ENCODER 配 evdev 在驱动里是 default: break（空实现）。
- * 所以自己 poll 多个 fd，只输出 (角色, 短按/长按)，完全不进 LVGL 输入子系统。
+ * 所以自己 poll 多个 fd，只输出 (角色, 短按/长按/连发)，完全不进 LVGL 输入子系统。
  *
- * 时序：30ms 去抖、600ms 长按、按下超 5s 未抬起自动复位（防卡键）。
+ * 时序：30ms 去抖、600ms 进长按、之后每 180ms 发一次 KEY_REPEAT（像键盘连发），
+ *       按下超 5s 未抬起自动复位（防卡键）。
  */
 #ifndef WAC_INDEV_KEYS_H
 #define WAC_INDEV_KEYS_H
@@ -26,7 +27,8 @@ typedef enum {
 
 typedef enum {
     KEY_SHORT = 0,
-    KEY_LONG,
+    KEY_LONG,   /* 按下满 600ms 时发一次 */
+    KEY_REPEAT, /* 长按继续持有：每 REPEAT_MS 发一次，抬起即停 */
 } key_kind_t;
 
 typedef void (*key_cb_t)(key_role_t role, key_kind_t kind);
