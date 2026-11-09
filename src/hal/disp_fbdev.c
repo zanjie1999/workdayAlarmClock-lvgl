@@ -1,24 +1,27 @@
 /**
  * disp_fbdev.c -- 真机 /dev/fb0 后端
  *
- * 目标板：TinaLinux / sun5i，帧缓冲 24bpp，物理 128x160 一页（两页共 128x320）。
- * 面板转过 90° 用，所以逻辑分辨率是 160x120，映射关系（照现有 timeDisplay.sh 的约定）：
+ * 两种面板方向都支持，靠 CMake 的 WAC_ROT 选：
+ *   rot 0   ：横装（rns 音箱，480x320 / 32bpp / line 1920），逻辑行=物理行，直写
+ *   rot 90  ：竖装（aku / sun5i，面板 128x160，两页共 128x320），转置后用
+ *             （照现有 timeDisplay.sh 的约定）
  *
- *     物理列 col = 逻辑 y        （只用到前 120 列）
+ *     物理列 col = 逻辑 y
  *     物理行 row = (面板高 - 1) - 逻辑 x
  *
- * 两个坑，都是实测踩出来的：
- *   1. 物理行必须按"面板高"(160) 算，不能用 yres_virtual(320)。用 320 会把整屏
- *      画进第二页，屏幕扫的是第一页 -> 全黑。
+ * 三个坑，都是实测踩出来的：
+ *   1. 物理行必须按"面板高"(s_ph = yres)，不能用 yres_virtual。aku 上是 320，
+ *      用 320 会把整屏画进第二页，屏幕扫的是第一页 -> 全黑。
  *   2. 这台板子的 fb mmap 出来的内存跟 /dev/fb0 的 read/write 不是同一块
  *      （mmap 写进去，dd if=/dev/fb0 读不回来），所以一律用 pwrite 落盘。
  *      原来那个 timeDisplay.sh 也是 `> /dev/fb0` 直接写，这是唯一验证过能上屏的路径。
+ *   3. 转置只能按 WAC_ROT 分支走。以前这里是写死 90° 转置的，rot=0 的面板
+ *      也会被转 90°，屏幕上是竖排的字。
  *
- * 像素格式用 LV_COLOR_FORMAT_XRGB8888（LVGL 里最好算的 4 字节格式），
- * 写帧缓冲时再拆成 24bpp 的 B/G/R —— 全志 fb 的 24bpp 是 little-endian 0x00RRGGBB，
- * 内存里就是 B,G,R 三个字节。
+ * 像素格式用 LV_COLOR_FORMAT_RGB565（对应 lv_conf 的颜色深度），写帧缓冲时
+ * 再展开成 24bpp 的 B/G/R 或 32bpp 的 XRGB8888。
  *
- * 不做 page flip：一页足够，160×120 一次全屏 flush 才 57KB。
+ * 不做 page flip：一页足够。
  */
 #include "wac.h"
 
@@ -48,8 +51,8 @@ static lv_display_t *s_disp;
 
 static uint8_t s_drawbuf[WAC_SCR_W * FB_CHUNK_H * 4];
 
-/* 一行物理像素的临时缓冲：最多 120 列 × 4 字节 */
-static uint8_t s_row[WAC_SCR_H * 4];
+/* 一行物理像素的临时缓冲：横装面板一行可以有 WAC_SCR_W 个像素，竖装是 WAC_SCR_H 个 */
+static uint8_t s_row[(WAC_SCR_W > WAC_SCR_H ? WAC_SCR_W : WAC_SCR_H) * 4];
 
 /* ------------------------------------------------------------ 时间 */
 static uint32_t tick_ms(void)
@@ -70,6 +73,29 @@ void wac_sleep_ms(uint32_t ms)
 }
 
 /* ------------------------------------------------------------ 刷屏 */
+/* RGB565 -> 帧缓冲像素。
+   24bpp：全志 fb 是 little-endian 0x00RRGGBB，内存里就是 B,G,R 三个字节；
+   32bpp：0xFFRRGGBB 写进去就是 XRGB8888 小端。 */
+static uint8_t *put_px(uint8_t *dst, int px, uint16_t c)
+{
+    /* RGB565 -> 8bit，逐通道把高位补到低位，避免发暗 */
+    uint32_t r = (c >> 11) & 0x1Fu;
+    uint32_t g = (c >> 5) & 0x3Fu;
+    uint32_t b = c & 0x1Fu;
+    r = (r << 3) | (r >> 2);
+    g = (g << 2) | (g >> 4);
+    b = (b << 3) | (b >> 2);
+
+    if (px == 3) {
+        dst[0] = (uint8_t)b;
+        dst[1] = (uint8_t)g;
+        dst[2] = (uint8_t)r;
+        return dst + 3;
+    }
+    *(uint32_t *)(void *)dst = 0xFF000000u | (r << 16) | (g << 8) | b;
+    return dst + 4;
+}
+
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
     /* 必须跟 LV_COLOR_DEPTH 16 / LV_DRAW_SW_SUPPORT_RGB565 对齐：
@@ -79,45 +105,55 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
     const int       px  = s_bpp / 8;
     const int32_t   w   = area->x2 - area->x1 + 1;
 
-    /* 一次 flush = 若干逻辑 x（物理行）× 若干逻辑 y（物理列）。
-       逻辑 y 连续 -> 物理列连续，正好是一段可以 pwrite 的行内区间。 */
+#if WAC_ROT == 90 || WAC_ROT == 270
+    /* 竖装面板（aku）：逻辑 x 走物理行，逻辑 y 走物理列。
+       一次 flush = 若干物理行，每行是"逻辑 y 方向"上连续的一段。 */
     for (int32_t x = area->x1; x <= area->x2; x++) {
-        const int prow = (s_ph - 1) - (int)x;
+#if WAC_ROT == 90
+        const int     prow = (s_ph - 1) - (int)x;
+        const int32_t col0 = area->y1;
+#else
+        const int     pcols = s_line / px; /* 物理面板一行有多少像素 */
+        const int     prow = (int)x;
+        const int32_t col0 = (pcols - 1) - area->y2;
+#endif
         if (prow < 0 || prow >= s_ph) continue;
 
+        const int32_t n_y = area->y2 - area->y1 + 1;
         uint8_t *dst = s_row;
-        for (int32_t y = area->y1; y <= area->y2; y++) {
-            /* px_map 是逻辑行优先：第 (y-y1) 行第 (x-x1) 列 */
-            const uint16_t c = src[(size_t)(y - area->y1) * (size_t)w + (size_t)(x - area->x1)];
-
-            /* RGB565 -> 8bit，逐通道把高位补到低位，避免发暗 */
-            uint32_t r = (c >> 11) & 0x1Fu;
-            uint32_t g = (c >> 5) & 0x3Fu;
-            uint32_t b = c & 0x1Fu;
-            r = (r << 3) | (r >> 2);
-            g = (g << 2) | (g >> 4);
-            b = (b << 3) | (b >> 2);
-
-            if (px == 3) {
-                dst[0] = (uint8_t)b;
-                dst[1] = (uint8_t)g;
-                dst[2] = (uint8_t)r;
-                dst += 3;
-            }
-            else { /* 32bpp：0xFFRRGGBB 写进去就是 XRGB8888 小端 */
-                *(uint32_t *)(void *)dst = 0xFF000000u | (r << 16) | (g << 8) | b;
-                dst += 4;
-            }
+        for (int32_t i = 0; i < n_y; i++) {
+#if WAC_ROT == 90
+            const uint16_t c = src[(size_t)i * (size_t)w + (size_t)(x - area->x1)];
+#else
+            const uint16_t c = src[(size_t)(n_y - 1 - i) * (size_t)w + (size_t)(x - area->x1)];
+#endif
+            dst = put_px(dst, px, c);
         }
 
-        const off_t off = (off_t)prow * (off_t)s_line + (off_t)area->y1 * (off_t)px;
-        /* 这一行只有"逻辑 y 跨度"那么多像素：y 是物理列方向。
-           （写成 w*px 会把行尾写穿到下一行的开头，整屏被 0 覆盖） */
-        const size_t n = (size_t)(area->y2 - area->y1 + 1) * (size_t)px;
+        const size_t n = (size_t)n_y * (size_t)px;
+        if (pwrite(s_fd, s_row, n, (off_t)prow * s_line + (off_t)col0 * px) != (ssize_t)n)
+            WAC_LOG("fb: pwrite row %d failed (%d)", prow, errno);
+    }
+#else
+    /* 横装面板（rns，rot 0 / 180）：逻辑行就是物理行，整行连续直写。
+       （以前这里写死成 90° 转置，rot=0 的面板也会被转 90°，屏幕上是竖排字） */
+    for (int32_t y = area->y1; y <= area->y2; y++) {
+        const int prow = (WAC_ROT == 180) ? (s_ph - 1 - (int)y) : (int)y;
+        if (prow < 0 || prow >= s_ph) continue;
 
+        const uint16_t *s = src + (size_t)(y - area->y1) * (size_t)w;
+        uint8_t *dst = s_row;
+        for (int32_t i = 0; i < w; i++) {
+            const int32_t j = (WAC_ROT == 180) ? (w - 1 - i) : i;
+            dst = put_px(dst, px, s[j]);
+        }
+
+        const size_t n = (size_t)w * (size_t)px;
+        const off_t  off = (off_t)prow * s_line + (off_t)area->x1 * px;
         if (pwrite(s_fd, s_row, n, off) != (ssize_t)n)
             WAC_LOG("fb: pwrite row %d failed (%d)", prow, errno);
     }
+#endif
 
     lv_display_flush_ready(disp);
 }
@@ -168,6 +204,16 @@ lv_display_t *wac_disp_init(void)
     lv_tick_set_cb(tick_ms);
 
     if (!fb_open()) return NULL;
+
+    /* 开机先把这一页刷黑：LVGL 只重画"失效区域"，fb 里原有的内容
+       （上一个程序退出时留下的画面）会一直留在背景上，看着像残影。 */
+    {
+        static const uint8_t zero[4096];
+        for (int r = 0; r < s_ph; r++) {
+            const size_t n = (size_t)(s_line < (int)sizeof(zero) ? s_line : (int)sizeof(zero));
+            if (pwrite(s_fd, zero, n, (off_t)r * s_line) < 0) break;
+        }
+    }
 
     s_disp = lv_display_create(WAC_SCR_W, WAC_SCR_H);
     if (!s_disp) {
