@@ -43,7 +43,7 @@ enum {
     OPT_REBOOT   = 8
 };
 
-static const char *OPT_TEXT[N_OPT] = {"显示秒",       "显示电量", "反转音量方向",
+static const char *OPT_TEXT[N_OPT] = {"显示秒",       "显示电量", "反转调节方向",
                                       "时间24小时制", "获取IP",   "检查更新",
                                       "亮度",         "关机",     "重启"};
 
@@ -194,11 +194,13 @@ static void bright_refresh(void)
     lv_label_set_text(s_bval, b);
 }
 
-/* dir > 0 = 下一个键 = 变暗；跟音量条同一套方向约定（下减上加） */
+/* dir > 0 = 下一个键 = 变暗；跟音量条同一套方向约定（下减上加）。
+   勾了"反转调节方向"时由 ui_adj_dir 统一翻过来。 */
 static void bright_edit_step(int dir)
 {
-    if (dir) {
-        int v = g_set.brightness + (dir > 0 ? -BR_STEP : +BR_STEP);
+    const int d = ui_adj_dir(dir);
+    if (d) {
+        int v = g_set.brightness + (d > 0 ? -BR_STEP : +BR_STEP);
         if (v < WAC_BRIGHT_MIN) v = WAC_BRIGHT_MIN;
         if (v > 100) v = 100;
         ui_bright_set(v);
@@ -396,7 +398,10 @@ static lv_obj_t *make_bright_row(lv_obj_t *parent, int32_t fs, int32_t sl_h, int
     lv_obj_t *val = lv_label_create(row);
     lv_obj_set_style_text_font(val, f_val, 0);
     lv_obj_set_style_text_color(val, COL_DIM, 0);
-    lv_obj_set_width(val, 22);
+    /* 宽度按"100"实测算，别写死：以前是 22px，24px 字号下连一个数字都放不下，
+       数字被挤成一列竖排（"1/0/0" 疯狂换行）。再加 CLIP 兜底，永远不折行。 */
+    lv_obj_set_width(val, lv_text_get_width("100", 3, f_val, 0) + 4);
+    lv_label_set_long_mode(val, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(val, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_text(val, "100");
 
@@ -457,14 +462,16 @@ static void build(lv_obj_t *root)
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
 
-    int32_t box = tiny ? 14 : (small ? 16 : 20);
-    int32_t fs  = tiny ? 13 : (small ? 18 : 24);
+    int32_t box = tk_pick(14, 16, 20, 20);
+    int32_t fs  = tk_pick(13, 18, 24, 24);
     const lv_font_t *f_chk = tiny ? &lv_font_montserrat_12
                                   : (small ? &lv_font_montserrat_14 : &lv_font_montserrat_20);
 
     /* 行高固定（小屏也要固定）：条目多了就滚动，而不是把每行压扁。
-       小屏 22px 仍大于 14px 的方框 + 13px 的字，行本身就是触摸区。 */
-    const int32_t row_h = tiny ? 22 : (small ? 44 : 64);
+       小屏 22px 仍大于 14px 的方框 + 13px 的字，行本身就是触摸区。
+       MEDIUM（480×320）用 52：字号 24 不缩，但比大屏的 64 矮一截，
+       一屏能多看一行，不至于翻半天。 */
+    const int32_t row_h = tk_pick(22, 44, 52, 64);
 
     {
         /* 内容比列表矮就上下匀一份 pad，把各行摆到视觉中间；
@@ -487,7 +494,7 @@ static void build(lv_obj_t *root)
         const int i = s_order[k];
         lv_obj_t *row;
         if (i == OPT_BRIGHT) {
-            row = make_bright_row(list, fs, tiny ? 6 : (small ? 8 : 12), row_h,
+            row = make_bright_row(list, fs, tk_pick(6, 8, 10, 12), row_h,
                                   tiny ? &lv_font_montserrat_12
                                        : (small ? &lv_font_montserrat_14 : &lv_font_montserrat_20));
         }

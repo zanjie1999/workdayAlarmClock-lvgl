@@ -42,6 +42,11 @@ void keys_init(void);
 int  keys_load_config(const char *path);
 int  keys_save_config(const char *path);
 
+/* 当前绑定表的路径：就是 keys_load_config 收到的那条（路径没读到文件也记得住）。
+ * 绑定向导保存时必须用它，否则会存到 cwd 下的同名文件里，
+ * 下次开机按 WAC_KEYS_CONF 又找不到 → 每次开机都重走一遍向导。 */
+const char *keys_config_path(void);
+
 /* 绑定某个角色到 evdev code（sim 下是虚拟键码）；code<0 表示解除 */
 void keys_bind(key_role_t role, int code);
 int  keys_code_of(key_role_t role);

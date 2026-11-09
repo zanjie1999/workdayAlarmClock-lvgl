@@ -366,14 +366,18 @@ static void build(lv_obj_t *root)
 {
     const int32_t W = WAC_SCR_W;
 
+    /* 顶部/底部这些"次要文字"跟着分辨率走：480×320 上以前只有中间的大数字
+       被放大了，日期行和迷你条还停在 16px，跟设置页/播放页一比就显小。 */
+    const int32_t fs_top = tk_pick(16, 16, 20, 22);
+
 /* ---------- 顶部状态行 ---------- */
-    /* 字号跟底部迷你条对齐（16px）。160 宽的屏上这四项 16px 一行放不下，
+    /* 字号跟底部迷你条对齐。160 宽的屏上这四项 16px 一行放不下，
        所以按"最坏情况（电量显示着 + 最长天气）"量一遍：
          放得下 -> 一行：[电量][日期][星期][天气]
          放不下 -> 两行：[日期 ......][星期]
                           [电量 ......][天气]
        行数决定 status_h，时钟的居中区间跟着算。 */
-    const lv_font_t *f_top = ui_font_cjk(16);
+    const lv_font_t *f_top = ui_font_cjk(fs_top);
     const int32_t    lh    = lv_font_get_line_height(f_top);
     const int32_t    inner = W - (g_tk.pad + 2) * 2;
 
@@ -405,8 +409,8 @@ static void build(lv_obj_t *root)
         /* 两行时总数不超过屏高的 1/3，否则挤得时钟没地方了（超大字号屏除外） */
         s_status_h = two ? lh * 2 : lh;
 
-        WAC_LOG("clock: top font=16 line_h=%d need=%d inner=%d -> %s (status_h=%d)", (int)lh,
-                (int)need, (int)inner, two ? "two rows" : "one row", (int)s_status_h);
+        WAC_LOG("clock: top font=%d line_h=%d need=%d inner=%d -> %s (status_h=%d)", (int)fs_top,
+                (int)lh, (int)need, (int)inner, two ? "two rows" : "one row", (int)s_status_h);
 
         lv_obj_t *top = lv_obj_create(root);
         lv_obj_remove_style_all(top);
@@ -548,12 +552,15 @@ static void build(lv_obj_t *root)
     s_mini_icon = lv_label_create(s_mini);
     /* 同上：图标走内置符号字体，不依赖中文字体的符号覆盖 */
     lv_obj_set_style_text_font(s_mini_icon,
-                               g_tk.bp == WAC_BP_TINY ? &lv_font_montserrat_14 : &lv_font_montserrat_20, 0);
+                               g_tk.bp == WAC_BP_TINY  ? &lv_font_montserrat_14
+                               : g_tk.bp == WAC_BP_SMALL ? &lv_font_montserrat_20
+                                                          : &lv_font_montserrat_28,
+                               0);
     lv_obj_set_style_text_color(s_mini_icon, COL_TEXT, 0);
     lv_label_set_text(s_mini_icon, LV_SYMBOL_PLAY);
 
     s_mini_title = lv_label_create(s_mini);
-    lv_obj_set_style_text_font(s_mini_title, ui_font_cjk(16), 0);
+    lv_obj_set_style_text_font(s_mini_title, ui_font_cjk(fs_top), 0);
     lv_obj_set_style_text_color(s_mini_title, COL_TEXT, 0);
     lv_obj_set_flex_grow(s_mini_title, 1);
     lv_label_set_long_mode(s_mini_title, LV_LABEL_LONG_SCROLL_CIRCULAR);

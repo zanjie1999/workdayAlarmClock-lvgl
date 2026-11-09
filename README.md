@@ -138,7 +138,9 @@ adb shell "rm /usr/data/duer_off && /etc/init.d/S99dueros_device start"
 ```
 
 开机时 `S99dueros_device` / `S95mic-server` 会先看这个标记：存在就只挂 zram swap、直接跳过小度。
-两个脚本的原始版本在设备上留了 `.orig` 备份（`S99dueros_device.orig`、`S95mic-server.orig`），
+两个脚本的原始版本备份在 **`/usr/data/init_backup/`**（**不要**留在 `/etc/init.d/` 里：
+`/etc/init.d/rcS` 的循环是 `for i in /etc/init.d/S??*`，`S99dueros_device.orig`、
+`S99workdayAlarmClock.bak` 这种名字照样匹配，开机会被当启动脚本执行一遍。
 仓库里对应的改造版是 `scripts/S99dueros_device` 和 `scripts/S95mic-server`。
 
 实测在这块 120MB 内存的板子上，关掉后空闲内存从 13MB 涨到 41MB。

@@ -81,6 +81,14 @@ void ui_set_flush_volume(void)
     ui_set_save();
 }
 
+/* 反转调节方向：音量、亮度这些"能用方向键调"的条都走这一个出口，
+ * 免得每个页面各写一遍、漏掉一处（之前亮度条就漏了）。 */
+int ui_adj_dir(int dir)
+{
+    if (dir == 0) return 0;
+    return g_set.vol_reverse ? -dir : dir;
+}
+
 void ui_set_save(void)
 {
     FILE *f = fopen(s_path, "w");

@@ -106,9 +106,13 @@ static key_role_t key_to_role(const char *k)
 
 int keys_load_config(const char *path)
 {
+    /* 先把路径记下来再打开：文件不存在时（首次启动）向导保存要用它，
+       否则 s_cfg_path 还停在默认的 "wac_keys.conf"（相对 cwd），
+       配置会落到应用根目录、下次开机又找不到 → 每次开机都重走一遍向导。 */
+    snprintf(s_cfg_path, sizeof(s_cfg_path), "%s", path);
+
     FILE *f = fopen(path, "r");
     if (!f) return -1;
-    snprintf(s_cfg_path, sizeof(s_cfg_path), "%s", path);
 
     keys_clear();
     char line[256];
@@ -140,8 +144,11 @@ int keys_load_config(const char *path)
     return 0;
 }
 
+const char *keys_config_path(void) { return s_cfg_path; }
+
 int keys_save_config(const char *path)
 {
+    snprintf(s_cfg_path, sizeof(s_cfg_path), "%s", path);
     FILE *f = fopen(path, "w");
     if (!f) return -1;
     for (int i = 1; i < ROLE_COUNT; i++) {

@@ -5,7 +5,7 @@
  *   1 键：短按=焦点前移（走完整环）   长按=确定
  *   2 键：方向短=下一个 方向长=上一个   确认短=确定 确认长=返回
  *   3 键：上下短=焦点 上下长=连发       确认短=确定 确认长=返回
- *   4 键：同 3 键 + BACK 短=返回上一层，BACK 长=回主页
+ *   4 键：同 3 键 + BACK 短=返回上一层（时钟页=播放/暂停），BACK 长=停止播放
  *
  * "连发"= 按住不放就按 REPEAT_MS 反复触发短按那个动作（键盘连发的手感），
  * 和长按本身绑定在一起，不再像以前那样另做一套"长按调音量 + 弹浮窗"。
@@ -62,13 +62,13 @@ static void nav_dir(int dir)
 }
 
 /* 返回上一层：在调节态里先退出调节（BACK 键在音量条上应该只是"退出来"）。
-   时钟页是根页面，没有"上一层"可回 —— 那里返回等于给 Go 发一条 1key。 */
+   时钟页是根页面，没有"上一层"可回 —— 那里"返回"= 播放/暂停。 */
 static void nav_back_or_exit_edit(void)
 {
     if (focus_exit_edit()) return;
     if (page_current() == WAC_PAGE_CLOCK) {
-        WAC_LOG("back on clock page -> 1key");
-        cmd_one_key();
+        WAC_LOG("back on clock page -> play/pause");
+        cmd_play_pause();
         return;
     }
     nav_back();
@@ -93,12 +93,15 @@ void nav_dispatch(key_role_t role, key_kind_t kind)
         return;
     }
 
-    /* 4 键的 BACK：短=返回上一层，长=回主页
+    /* 4 键的 BACK：短=返回上一层（时钟页=播放/暂停），长=停止播放
        只有真的凑齐 4 键时才这么解释；2/3 键向导里跳步后可能误绑到 BACK，
        那时它应该退回"方向键"的角色，否则短按会变成返回、焦点动不了。 */
     if (role == ROLE_BACK && nav_mode() >= 4) {
         if (kind == KEY_SHORT) nav_back_or_exit_edit();
-        else if (kind == KEY_LONG) nav_home();
+        else if (kind == KEY_LONG) {
+            WAC_LOG("back long -> stop");
+            cmd_stop();
+        }
         return;
     }
 

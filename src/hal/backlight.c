@@ -12,10 +12,12 @@ static char s_path[256];
 
 #ifdef WAC_SIM
 
-int  backlight_init(void) { s_ok = false; return -1; }
+/* 电脑上没有 /sys/class/backlight，设置页的亮度行默认不建。
+   调布局时用 WAC_SIM_BACKLIGHT=1 假装有背光，好核对那一行的排版。 */
+int  backlight_init(void) { s_ok = getenv("WAC_SIM_BACKLIGHT") != NULL; return s_ok ? 0 : -1; }
 void backlight_set(int percent) { s_cur = percent; }
 int  backlight_get(void) { return s_cur; }
-bool backlight_available(void) { return false; }
+bool backlight_available(void) { return s_ok; }
 
 #else
 

@@ -47,6 +47,20 @@ static inline int32_t tk_px(int32_t base)
     return (base * g_tk.k + 50) / 100;
 }
 
+/* 按断点取尺寸/字号：tiny / small / medium / large+（XL 与 LARGE 共用一档）。
+ * 以前各页面写的是"tiny ? a : (small ? b : c)"，导致 480×320 这种 MEDIUM 屏
+ * 直接吃到大屏那一档（字号 24、按钮 96×80 → 一行放不下、数字被挤成竖排）。
+ * 统一走这里，加一档只改一处。 */
+static inline int32_t tk_pick(int32_t tiny, int32_t small, int32_t medium, int32_t large)
+{
+    switch (g_tk.bp) {
+        case WAC_BP_TINY:   return tiny;
+        case WAC_BP_SMALL:  return small;
+        case WAC_BP_MEDIUM: return medium;
+        default:            return large;
+    }
+}
+
 /* ===== 颜色 ===== */
 #define COL_BG     lv_color_hex(0x000000)
 #define COL_TEXT   lv_color_hex(0xFFFFFF)

@@ -69,13 +69,13 @@ void cmd_vol(int delta)
     wac_cmd("vol %d", v);
 }
 
-/* 反转开关只翻"方向"，不改步长；dir==0 直接忽略 */
+/* 反转开关只翻"方向"，不改步长；dir==0 直接忽略。
+   翻转逻辑在 ui_adj_dir 里，跟亮度条共用一份。 */
 void cmd_vol_step(int dir)
 {
-    if (dir == 0) return;
-    int s = (dir > 0) ? +CMD_VOL_STEP : -CMD_VOL_STEP;
-    if (g_set.vol_reverse) s = -s;
-    cmd_vol(s);
+    int d = ui_adj_dir(dir);
+    if (d == 0) return;
+    cmd_vol(d > 0 ? +CMD_VOL_STEP : -CMD_VOL_STEP);
 }
 
 void cmd_one_key(void) { wac_cmd("1key"); }

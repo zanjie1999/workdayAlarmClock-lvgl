@@ -12,7 +12,7 @@
 typedef struct {
     bool show_seconds; /* 时钟显示秒；关掉后秒消失、字号会自动变大 */
     bool show_battery; /* 顶部状态行显示电量百分比 */
-    bool vol_reverse;  /* 反转音量方向（方向键调音量时加/减对调） */
+    bool vol_reverse;  /* 反转调节方向：音量/亮度等所有"能用方向键调的条"都跟着翻 */
     bool hour24;       /* 时间 24 小时制；关掉=12 小时制（默认关） */
     int  brightness;   /* 亮度 10..100（硬件背光，没有 sysfs 时不显示这条） */
     int  vol_cache;    /* 上一次的音量：开机第一屏先拿它回显，等 Go 报真值再覆盖 */
@@ -32,5 +32,9 @@ void ui_set_note_volume(int v);
 
 /* 由 250ms 的状态定时器调用，负责把脏了的音量存下去 */
 void ui_set_flush_volume(void);
+
+/* "反转调节方向"的唯一出口：所有能用方向键调的条（音量、亮度……）都先过这里。
+ * dir 是页面自己的方向约定（>0 = 下一个键），勾了反转就取反；dir==0 原样返回。 */
+int ui_adj_dir(int dir);
 
 #endif /* WAC_UI_SETTINGS_H */

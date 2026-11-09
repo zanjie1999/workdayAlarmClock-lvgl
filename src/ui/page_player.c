@@ -317,13 +317,13 @@ static void build(lv_obj_t *root)
 {
     const int32_t W    = WAC_SCR_W;
     const int32_t H    = WAC_SCR_H;
-    const bool    tiny = (g_tk.bp == WAC_BP_TINY);
-    const bool    small = (g_tk.bp == WAC_BP_SMALL);
     const int32_t avail = W - g_tk.pad * 2;
+    const bool    tiny  = (g_tk.bp == WAC_BP_TINY);
+    const bool    small = (g_tk.bp == WAC_BP_SMALL);
 
     /* ---------- 标题 ---------- */
     s_title = lv_label_create(root);
-    lv_obj_set_style_text_font(s_title, ui_font_cjk(tiny ? 16 : (small ? 20 : 28)), 0);
+    lv_obj_set_style_text_font(s_title, ui_font_cjk(tk_pick(16, 20, 22, 28)), 0);
     lv_obj_set_style_text_color(s_title, COL_TEXT, 0);
     lv_obj_set_style_text_align(s_title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(s_title, avail);
@@ -332,8 +332,8 @@ static void build(lv_obj_t *root)
     lv_obj_align(s_title, LV_ALIGN_TOP_MID, 0, g_tk.pad);
 
     /* ---------- 进度条 ---------- */
-    const int32_t bar_h = tiny ? 3 : (small ? 4 : 6);
-    const int32_t bar_y = g_tk.pad + (tiny ? 24 : 30);
+    const int32_t bar_h = tk_pick(3, 4, 6, 6);
+    const int32_t bar_y = g_tk.pad + tk_pick(24, 30, 34, 30);
     s_bar = lv_bar_create(root);
     lv_obj_remove_style_all(s_bar);
     lv_obj_set_size(s_bar, avail, bar_h);
@@ -351,26 +351,33 @@ static void build(lv_obj_t *root)
 
     /* ---------- 时间文字：小屏也显示（11px），不然"有进度"看不出来 ---------- */
     s_pos = lv_label_create(root);
-    lv_obj_set_style_text_font(s_pos, ui_font_cjk(tiny ? 11 : (small ? 14 : 18)), 0);
+    lv_obj_set_style_text_font(s_pos, ui_font_cjk(tk_pick(11, 14, 14, 18)), 0);
     lv_obj_set_style_text_color(s_pos, COL_DIM, 0);
     lv_label_set_text(s_pos, "");
     lv_obj_align(s_pos, LV_ALIGN_TOP_LEFT, g_tk.pad + 1, bar_y + bar_h + 1);
 
     s_dur = lv_label_create(root);
-    lv_obj_set_style_text_font(s_dur, ui_font_cjk(tiny ? 11 : (small ? 14 : 18)), 0);
+    lv_obj_set_style_text_font(s_dur, ui_font_cjk(tk_pick(11, 14, 14, 18)), 0);
     lv_obj_set_style_text_color(s_dur, COL_DIM, 0);
     lv_label_set_text(s_dur, "");
     lv_obj_align(s_dur, LV_ALIGN_TOP_RIGHT, -g_tk.pad - 1, bar_y + bar_h + 1);
 
     /* ---------- 尺寸 ---------- */
     int32_t bw_side, bw_mid, bh, gap, vol_h, vol_min_w;
-    if (tiny) {
+    if (g_tk.bp == WAC_BP_TINY) {
         bw_side = 30; bw_mid = 46; bh = 36; gap = 4;
         vol_h = 14;   vol_min_w = 44;
     }
-    else if (small) {
+    else if (g_tk.bp == WAC_BP_SMALL) {
         bw_side = 64; bw_mid = 96; bh = 56; gap = 6;
         vol_h = 20;   vol_min_w = 90;
+    }
+    else if (g_tk.bp == WAC_BP_MEDIUM) {
+        /* 480×320 这类屏：以前的"大屏档"是 96/160/80，一行 484px 放不进 470，
+           LVGL 的 flex 会把它挤成不等宽、两边顶到屏幕边缘。这里按 470 反推：
+           3*88 + 140 + 3*12 = 440，两边各留 15px。 */
+        bw_side = 88; bw_mid = 140; bh = 96; gap = 12;
+        vol_h = 22;   vol_min_w = 150;
     }
     else {
         bw_side = 96; bw_mid = 160; bh = 80; gap = 12;
@@ -381,22 +388,38 @@ static void build(lv_obj_t *root)
     s_f_btn = tiny ? &lv_font_montserrat_20
                    : (small ? &lv_font_montserrat_28 : &lv_font_montserrat_48);
 
-    const int32_t btns_w = bw_side * 3 + bw_mid + gap * 3;
+    int32_t btns_w = bw_side * 3 + bw_mid + gap * 3;
+    /* 兜底：万一还是放不下，按 mid:side ≈ 1.6 反解着收，
+       绝不能让 flex 去挤（挤出来就是"按钮左右顶出屏幕"） */
+    if (btns_w > avail) {
+        bw_side = (avail - gap * 3) * 10 / 56;
+        if (bw_side < 8) bw_side = 8;
+        bw_mid  = bw_side * 16 / 10;
+        btns_w  = bw_side * 3 + bw_mid + gap * 3;
+    }
+
     /* 放得进一行就同排，放不进就换行 —— 不猜分辨率 */
     const bool same_row = (btns_w + gap + vol_min_w) <= avail;
 
-    /* 时间行往下到屏底这段里，把"按钮 + 音量"当作一块整体居中，
-       避免小屏上按钮贴着底、中间空一大条 */
+    /* 时间行往下到屏底的这段：按钮在它上面居中，音量条钉在最底下。
+       以前是"整块居中"和"音量条 = 按钮下沿 + gap"两种写法，前者底部空一大条，
+       后者在高屏上按钮和音量条都挤在上半截。 */
     const int32_t vol_box_h = vol_h + VOL_BOX_EXTRA;
-    const int32_t time_h   = lv_font_get_line_height(lv_obj_get_style_text_font(s_pos, 0));
-    const int32_t area_top = bar_y + bar_h + 1 + time_h + 2;
-    const int32_t area_h   = H - g_tk.pad - area_top;
-    const int32_t block_h  = same_row ? bh : (bh + gap + vol_box_h);
-    int32_t       y0       = area_top + (area_h - block_h) / 2;
-    if (y0 < area_top) y0 = area_top;
+    const int32_t time_h    = lv_font_get_line_height(lv_obj_get_style_text_font(s_pos, 0));
+    const int32_t area_top  = bar_y + bar_h + 1 + time_h + 2;
+    const int32_t area_bot  = H - g_tk.pad;
 
-    const int32_t btn_y = y0;
-    const int32_t vol_y = same_row ? (H - g_tk.pad - vol_box_h) : (y0 + bh + gap);
+    const int32_t vol_y = same_row ? 0 : (area_bot - vol_box_h);
+    int32_t       btn_y;
+    if (same_row) {
+        btn_y = area_top + ((area_bot - area_top) - bh) / 2;
+    }
+    else {
+        int32_t band_bot = vol_y - gap;
+        if (band_bot < area_top + bh) band_bot = area_top + bh;
+        btn_y = area_top + ((band_bot - area_top) - bh) / 2;
+    }
+    if (btn_y < area_top) btn_y = area_top;
 
     lv_obj_t *row = lv_obj_create(root);
     lv_obj_remove_style_all(row);

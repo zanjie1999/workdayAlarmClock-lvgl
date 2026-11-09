@@ -10,8 +10,6 @@
 #include "theme.h"
 #include "ui_font.h"
 
-#define CONFIG_PATH "wac_keys.conf"
-
 typedef struct {
     key_role_t  role;
     const char *title;
@@ -67,7 +65,8 @@ static void wizard_close(void)
     if (!s_active) return;
 
     if (s_confirm_code >= 0) {
-        keys_save_config(CONFIG_PATH);
+        /* 存回"当初想读的那条路径"，不是 cwd 下的同名文件 */
+        keys_save_config(keys_config_path());
         WAC_LOG("wizard done: %d keys", keys_bound_count());
     }
     else {
