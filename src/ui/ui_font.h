@@ -50,12 +50,15 @@ int32_t ui_font_clock_text_w(const lv_font_t *f);
  *
  * LVGL 的 flex/align 是按"行框"居中的，但不同字体的 ascent 留白差别很大：
  * 微软雅黑只偏 1px，设备上那个楷体偏 6~7px，于是行里的字看起来"沉"在行底。
- * 需要视觉居中时给 label 加 translate_y = -ui_font_ink_lift(f)。 */
+ *
+ * 值按字号缓存：每种字号在字体创建时量一次「中」（时钟字体量「0」），之后只查表。
+ * 内置符号字体（LV_SYMBOL_*，Montserrat 位图）没有汉字度量，固定返回 0 —— 图标不动。 */
 int32_t ui_font_ink_lift(const lv_font_t *f);
 
-/* 同上，但按指定字符的度量算：图标走的是内置符号字体（Montserrat 的私用区），
- * 跟'中'不是一个 em 框，得用图标自己的字形来算才准。 */
-int32_t ui_font_ink_lift_cp(const lv_font_t *f, uint32_t letter);
+/* 把 label 的文字按墨迹在行框里竖直居中（内部查上表的偏移量，设 translate_y）。
+ * 用 translate_y 而不是改对齐偏移：不动布局，换字体也不会把容器撑大。
+ * 只对 TTF 文字有效；图标所在的符号字体偏移量为 0，调用等于没调用。 */
+void ui_font_vcenter(lv_obj_t *obj);
 
 /* 按"汉字墨迹占 box_h 的百分比"反算字号（pct<=0 时按 60%）。
  * box_h 是一整条的高度（底部迷你条 / 提示行），内部拿 32px 量一次字体度量再按

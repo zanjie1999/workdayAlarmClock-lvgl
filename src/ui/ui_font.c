@@ -23,6 +23,7 @@
 typedef struct {
     int32_t    px;
     lv_font_t *font;
+    int32_t    lift; /* 该字号汉字的上下偏移量，建字体时算一次，之后只查表 */
 } face_t;
 
 static face_t s_cjk[MAX_FACES];
@@ -97,6 +98,29 @@ static const char *const CLK_CANDIDATES[] = {
     "/usr/share/wac/wac_clock.ttf",
 };
 
+/* 墨迹中心相对行框中心的下沉量（正=看着偏下）。
+   LVGL 画字形（lv_draw_label.c）：y1 = label_top + (line_height - base_line) - box_h - ofs_y；
+   行框居中时 label_top = 中心 - line_height/2，于是
+       d = ink_top + box_h/2 - line_height/2
+         = (line_height/2 - base_line) - (box_h/2 + ofs_y)。
+   同一字体同一字号这个值固定，所以每个 face 只在建字体时算一次，之后全项目查表。 */
+static int32_t ink_lift_calc(const lv_font_t *f, uint32_t cp)
+{
+    lv_font_glyph_dsc_t g;
+    if (!f || !lv_font_get_glyph_dsc(f, &g, cp, 0)) return 0;
+    if (g.is_placeholder) return 0; /* 字体里没这个字：度量不可信，宁可不提 */
+
+    const int32_t ink_top = (f->line_height - f->base_line) - (int32_t)g.box_h - (int32_t)g.ofs_y;
+    return ink_top + (int32_t)g.box_h / 2 - f->line_height / 2;
+}
+
+/* 两套字体各用一个代表字符：汉字用「中」；时钟字体里没有汉字，用「0」。
+   列表指针本身就区分了族，不必再传参数。 */
+static uint32_t lift_cp_of(const face_t *list)
+{
+    return (list == s_clk) ? (uint32_t)'0' : 0x4E2D;
+}
+
 static lv_font_t *face_get(face_t *list, int *n, const char *path, int32_t px)
 {
     if (px < 6) px = 6;
@@ -120,7 +144,11 @@ static lv_font_t *face_get(face_t *list, int *n, const char *path, int32_t px)
 
     list[*n].px   = px;
     list[*n].font = f;
+    list[*n].lift = ink_lift_calc(f, lift_cp_of(list)); /* 只在这里算一次 */
     (*n)++;
+
+    WAC_LOG("font: %s @%dpx lift=%d", (list == s_clk) ? "clock" : "cjk", (int)px,
+            (int)list[*n - 1].lift);
     return f;
 }
 
@@ -171,25 +199,39 @@ const lv_font_t *ui_font_cjk(int32_t px)
     return f ? f : FALLBACK_FONT;
 }
 
-int32_t ui_font_ink_lift_cp(const lv_font_t *f, uint32_t letter)
+/* 查表：字体指针 → 建字体时算好的偏移量 */
+static bool face_lift_find(const face_t *list, int n, const lv_font_t *f, int32_t *out)
 {
-    if (!f || !letter) return 0;
-
-    lv_font_glyph_dsc_t g;
-    if (!lv_font_get_glyph_dsc(f, &g, letter, 0)) return 0;
-
-    /* LVGL 画字形（lv_draw_label.c）：
-           ink_top = label_top + (line_height - base_line) - box_h - ofs_y
-       行框居中时 label_top = 区域中心 - line_height/2，
-       于是「墨迹中心 - 行框中心」= ink_top + box_h/2 - line_height/2。 */
-    const int32_t ink_top = (f->line_height - f->base_line) - (int32_t)g.box_h - (int32_t)g.ofs_y;
-    return ink_top + (int32_t)g.box_h / 2 - f->line_height / 2;
+    for (int i = 0; i < n; i++) {
+        if (list[i].font == f) {
+            *out = list[i].lift;
+            return true;
+        }
+    }
+    return false;
 }
 
 int32_t ui_font_ink_lift(const lv_font_t *f)
 {
-    /* 界面文字以中文为主，汉字在行框里的位置最有代表性 */
-    return ui_font_ink_lift_cp(f, 0x4E2D /* 中 */);
+    int32_t d = 0;
+    if (!f) return 0;
+    if (face_lift_find(s_cjk, s_cjk_n, f, &d)) return d;
+    if (face_lift_find(s_clk, s_clk_n, f, &d)) return d;
+    return 0; /* 内置符号字体 / Montserrat 兜底：没有汉字度量，不动它 */
+}
+
+void ui_font_vcenter(lv_obj_t *obj)
+{
+    if (!obj) return;
+
+    const lv_font_t *f = lv_obj_get_style_text_font(obj, 0);
+    const int32_t    d = ui_font_ink_lift(f);
+
+    /* 图标（符号字体）偏移量恒为 0，本来就在中间：别去碰它。 */
+    if (d == 0 && lv_obj_get_style_translate_y(obj, 0) == 0) return;
+
+    /* 但只要有过偏移就必须写：字号或字体改过之后旧值要清掉，不能靠 if (d) 跳过 */
+    lv_obj_set_style_translate_y(obj, -d, 0);
 }
 
 int32_t ui_font_clock_text_w(const lv_font_t *f)

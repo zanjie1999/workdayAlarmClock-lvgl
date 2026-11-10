@@ -22,6 +22,8 @@ typedef enum {
     ROLE_PREV,
     ROLE_NEXT,
     ROLE_BACK,
+    ROLE_VOL_UP,
+    ROLE_VOL_DOWN,
     ROLE_COUNT
 } key_role_t;
 
@@ -52,7 +54,7 @@ void keys_bind(key_role_t role, int code);
 int  keys_code_of(key_role_t role);
 int  keys_role_of_code(int code);
 
-/* 已绑定多少个角色（决定 1/2/3/4 键模式） */
+/* 已绑定多少个角色（决定 1~6 键模式：5 键=没有返回、6 键=全都有） */
 int  keys_bound_count(void);
 
 /* 清空所有绑定（重绑向导开头调用） */

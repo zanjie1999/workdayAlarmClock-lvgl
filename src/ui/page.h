@@ -42,4 +42,8 @@ void page_clock_settings_changed(void);
    自检/截图核对用，UI 逻辑不依赖它。 */
 bool page_clock_vol_mode(void);
 
+/* 短暂亮一下底部音量条（5/6 键模式按音量键时用）。
+   不进入调节态：1.5 秒后自己收起，方向键/确认键的语义都不变。 */
+void page_clock_vol_flash(void);
+
 #endif /* WAC_PAGE_H */

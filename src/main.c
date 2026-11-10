@@ -194,6 +194,32 @@ static void selftest(lv_indev_t *touch)
     WAC_LOG("AUTOTEST FBSTREAM          -> paused=%d", (int)ui_pause_active());
     event_handle_line("FBEND");
     WAC_LOG("AUTOTEST FBSTREAM          -> paused=%d", (int)ui_pause_active());
+
+    /* 5/6 键模式（WAC_SIM_KEYS=5|6 启动才有）：
+       时钟页确认键 = 播放/暂停（不展开音量条），音量键短按调音量并闪现条、
+       长按切歌。默认 4 键不跑这段。 */
+    if (nav_mode() >= 5) {
+        nav_home();
+        st_tick(4);
+
+        const int st0 = (int)g_state.state;
+        st_press("5K CLOCK OK", ROLE_CONFIRM, KEY_SHORT);
+        WAC_LOG("AUTOTEST 5K CLOCK OK    -> page=%d edit=%d vol_on=%d state %d->%d",
+                (int)page_current(), focus_in_edit() ? 1 : 0, page_clock_vol_mode() ? 1 : 0, st0,
+                (int)g_state.state);
+
+        const int v0 = (int)g_state.volume;
+        st_press("5K VOL SHORT", ROLE_VOL_UP, KEY_SHORT);
+        WAC_LOG("AUTOTEST 5K VOL SHORT   -> vol %d->%d vol_on=%d", v0, (int)g_state.volume,
+                page_clock_vol_mode() ? 1 : 0);
+
+        st_tick(90); /* 1.8s：闪现该收掉了 */
+        WAC_LOG("AUTOTEST 5K VOL HIDE    -> vol_on=%d (expect 0)",
+                page_clock_vol_mode() ? 1 : 0);
+
+        st_press("5K VOL LONG+", ROLE_VOL_UP, KEY_LONG);   /* 下一曲，只切一首 */
+        st_press("5K VOL LONG-", ROLE_VOL_DOWN, KEY_LONG); /* 上一曲 */
+    }
 }
 #endif
 
@@ -249,6 +275,8 @@ int main(void)
             WAC_LOG("no wac_keys.conf -> bind wizard");
             wizard_start();
         }
+        /* 模式由绑定数量推导，必须等配置读完再报（读之前说 4 键是假的） */
+        WAC_LOG("keys: resolved %d-key mode", nav_mode());
     }
 
 #ifdef WAC_SIM

@@ -38,6 +38,10 @@ static char s_hint_last[128];   /* 上一次设进 label 的文字，避免重�
    音量条 / 提示行 / 迷你条，三者互斥，都占同一块位置。 */
 static bool s_vol_on;
 
+/* 5/6 键模式按音量键时的"闪一下"：到点之前也算 s_vol_on，过点自己收。
+   0 表示没有正在进行的闪现。 */
+static uint32_t s_vol_flash_until;
+
 static focus_list_t s_focus;
 
 static int32_t s_avail_w;      /* 时钟可用的最大宽度（不含左右留白） */
@@ -50,49 +54,10 @@ static const char *WEEK_CN[] = {"周日", "周一", "周二", "周三", "周四"
 
 /* 汉字（尤其楷体）在行框里是**偏下**的：行框上方留给 accent 的空档比下方大。
  * flex 的 CROSS 居中按行框算，于是整行看着往下掉（480×320 上实测偏 5px，
- * 小屏字小、偏得也少，所以只有大屏明显）。这里把墨迹"提"回行框中心，
- * 跟设置页 text_vcenter() 是同一套算法（ui_font_ink_lift）。
- * 用 translate_y 而不是改对齐偏移：不动布局，切字体也不会把容器撑大。
+ * 小屏字小、偏得也少，所以只有大屏明显）。这里把墨迹"提"回行框中心。
  *
- * 度量取 label **自己的第一个字**：图标用的是内置符号字体，em 框跟汉字不一样，
- * 统一按'中'算会把图标提过头。 */
-/* 取 UTF-8 串的第一个码点（label 文本里第一个字就是最典型的那个字形）。
-   只处理 1~4 字节的常规编码，界面文字用不到别的。 */
-static uint32_t first_codepoint(const char *s)
-{
-    if (!s || !*s) return 0;
-
-    const unsigned char *p = (const unsigned char *)s;
-
-    if (p[0] < 0x80) return p[0];
-    if ((p[0] & 0xE0) == 0xC0 && p[1]) return ((uint32_t)(p[0] & 0x1F) << 6) | (p[1] & 0x3F);
-    if ((p[0] & 0xF0) == 0xE0 && p[1] && p[2]) {
-        return ((uint32_t)(p[0] & 0x0F) << 12) | ((uint32_t)(p[1] & 0x3F) << 6) | (p[2] & 0x3F);
-    }
-    if ((p[0] & 0xF8) == 0xF0 && p[1] && p[2] && p[3]) {
-        return ((uint32_t)(p[0] & 0x07) << 18) | ((uint32_t)(p[1] & 0x3F) << 12)
-             | ((uint32_t)(p[2] & 0x3F) << 6) | (p[3] & 0x3F);
-    }
-    return p[0];
-}
-
-static void label_vcenter(lv_obj_t *obj)
-{
-    if (!obj) return;
-
-    const lv_font_t *f = lv_obj_get_style_text_font(obj, 0);
-    if (!f) return;
-
-    uint32_t letter = 0x4E2D; /* 中 */
-    if (lv_obj_check_type(obj, &lv_label_class)) {
-        const uint32_t cp = first_codepoint(lv_label_get_text(obj));
-        if (cp) letter = cp;
-    }
-
-    const int32_t d = ui_font_ink_lift_cp(f, letter);
-    if (d) lv_obj_set_style_translate_y(obj, -d, 0);
-}
-
+ * 偏移量不在这里算：ui_font 按字号量一次「中」并缓存，页面直接查表（ui_font_vcenter）。
+ * 图标（LV_SYMBOL_*）走内置符号字体，不在缓存里、偏移量为 0，所以不会被碰。 */
 /* 容器里所有 label 统一提一遍（状态行 r1/r2 的写法是"按行数分两支"，
  * 逐个加调用容易漏，直接扫子对象） */
 static void lift_labels(lv_obj_t *parent)
@@ -102,7 +67,7 @@ static void lift_labels(lv_obj_t *parent)
     const uint32_t n = lv_obj_get_child_count(parent);
     for (uint32_t i = 0; i < n; i++) {
         lv_obj_t *c = lv_obj_get_child(parent, i);
-        if (lv_obj_check_type(c, &lv_label_class)) label_vcenter(c);
+        if (lv_obj_check_type(c, &lv_label_class)) ui_font_vcenter(c);
     }
 }
 
@@ -209,7 +174,7 @@ static void refresh_mini(void)
         lv_obj_remove_flag(s_mini, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(s_mini_icon,
                           g_state.state == WAC_ST_PLAYING ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
-        label_vcenter(s_mini_icon); /* 播放/暂停两个字形墨迹不一样高，换完重算一次 */
+        /* 图标不需要偏移：符号字体里两个字形本来就在行框中线附近 */
         lv_label_set_text(s_mini_title, g_state.title[0] ? g_state.title : WAC_DEF_TITLE);
     }
     else {
@@ -256,10 +221,16 @@ static void refresh_hint(void)
  * 为什么不让确认键继续"点迷你条 → 进播放页"：迷你条只在播放时才有，
  * 平时那一下确认键等于什么也没有；改成调音量正好补上最常用的那个操作。
  * 想进播放页仍然可以触摸点整屏。
+ *
+ * 5/6 键模式例外：那两种模式有独立的音量键（短按调音量），所以确认键改回
+ * 播放/暂停（见 keymap.c），音量条改成"按音量键时闪一下" —— 不进调节态，
+ * 1.5 秒后自己收（page_clock_vol_flash）。
  */
 static void vol_mode_apply(void)
 {
-    s_vol_on = focus_in_edit();
+    /* 两种来源：真的进了调节态（focus 的 EDITED），或者按音量键闪一下 */
+    const bool flash = s_vol_flash_until && (int32_t)(wac_millis() - s_vol_flash_until) < 0;
+    s_vol_on = focus_in_edit() || flash;
 
     if (s_volrow) {
         if (s_vol_on) {
@@ -300,6 +271,16 @@ static void clock_activate(lv_obj_t *obj)
 bool page_clock_vol_mode(void)
 {
     return s_vol_on;
+}
+
+/* 5/6 键模式：按音量键时把底条亮一下，不进入调节态。
+   1500ms 后由 timer_cb 收起（刷新定时器 200ms，误差可忽略）。 */
+void page_clock_vol_flash(void)
+{
+    if (!s_volrow) return;
+
+    s_vol_flash_until = wac_millis() + 1500;
+    vol_mode_apply();
 }
 
 static void page_clock_refresh(void)
@@ -406,6 +387,7 @@ static void on_show(void)
 
     /* 每次进页都把调节态收掉：底部还回迷你条 / 提示行 */
     s_vol_on = false;
+    s_vol_flash_until = 0;
     if (s_volrow) lv_obj_add_flag(s_volrow, LV_OBJ_FLAG_HIDDEN);
 
     page_clock_refresh();
@@ -415,6 +397,12 @@ static void timer_cb(lv_timer_t *t)
 {
     LV_UNUSED(t);
     page_clock_refresh();
+
+    /* 音量条闪现到点：收掉（refresh 里不会动它，这里必须显式刷一次） */
+    if (s_vol_flash_until && (int32_t)(wac_millis() - s_vol_flash_until) >= 0) {
+        s_vol_flash_until = 0;
+        vol_mode_apply();
+    }
 }
 
 static void build(lv_obj_t *root)
@@ -616,7 +604,6 @@ static void build(lv_obj_t *root)
     lv_obj_set_style_text_font(s_mini_icon, ui_font_symbol(px_bot), 0);
     lv_obj_set_style_text_color(s_mini_icon, COL_TEXT, 0);
     lv_label_set_text(s_mini_icon, LV_SYMBOL_PLAY);
-    label_vcenter(s_mini_icon); /* 图标的墨迹同样不在 em 框正中，跟文字一条基线 */
 
     s_mini_title = lv_label_create(s_mini);
     lv_obj_set_style_text_font(s_mini_title, f_bot, 0);
@@ -624,7 +611,7 @@ static void build(lv_obj_t *root)
     lv_obj_set_flex_grow(s_mini_title, 1);
     lv_label_set_long_mode(s_mini_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_label_set_text(s_mini_title, WAC_DEF_TITLE);
-    label_vcenter(s_mini_title); /* 不提的话墨迹贴着条底，跟图标也不在一个水平线上 */
+    ui_font_vcenter(s_mini_title); /* 不提的话墨迹贴着条底，跟图标也不在一个水平线上 */
 
     lv_obj_add_flag(s_mini, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_mini, LV_OBJ_FLAG_CLICKABLE);
@@ -655,7 +642,7 @@ static void build(lv_obj_t *root)
 
         int32_t dy = -(strip - lh) / 2; /* BOTTOM 对齐时的上移量：行框落在条中间 */
         lv_obj_align(s_hint, LV_ALIGN_BOTTOM_MID, 0, dy);
-        label_vcenter(s_hint);
+        ui_font_vcenter(s_hint);
 
         lv_obj_add_flag(s_hint, LV_OBJ_FLAG_HIDDEN);
     }

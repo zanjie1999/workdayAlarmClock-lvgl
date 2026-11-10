@@ -37,7 +37,11 @@
     /* 模拟器要跑 800×1280 / 1024×600 并截图（一张 RGB565 快照 = W×H×2），池子给足 */
     #define LV_MEM_SIZE (4096 * 1024U)
 #else
-    #define LV_MEM_SIZE (768 * 1024U)
+    /* 768KB 在"开秒"时会爆：时钟数字字号会涨到 260px，单个数字的 A8 字形
+       位图就是 156×260 = 40KB，0-9 加冒号十个字就 400KB+，再叠上设置页
+       的中文字形，池子见底 → FreeType 拿不到 draw buffer → 断言。
+       真机内存 3.8G，直接从余量里拿 4MB，不再靠这种极限压榨。 */
+    #define LV_MEM_SIZE (4096 * 1024U)
 #endif
 #define LV_USE_STDLIB_STRING LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_SPRINTF LV_STDLIB_BUILTIN
@@ -81,6 +85,13 @@
 #define LV_USE_ASSERT_STYLE 0
 #define LV_USE_ASSERT_MEM_INTEGRITY 0
 #define LV_USE_ASSERT_OBJ 0
+
+/* 断言兜底：LVGL 默认的 LV_ASSERT_HANDLER 是 while(1)，一旦断言就原地死循环——
+   画面冻住、进程还活着占着 100% CPU，systemd 也不知道该重启，只能人工断电。
+   改成 abort()：workday-alarm.service 是 Restart=always，3 秒后自动拉起新进程，
+   用户看到的只是闪一下。日志已经由 LV_LOG_ERROR 打过了，不会丢现场。 */
+#define LV_ASSERT_HANDLER_INCLUDE <stdlib.h>
+#define LV_ASSERT_HANDLER abort();
 
 /*====================
    控件与特性

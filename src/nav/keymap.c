@@ -6,6 +6,14 @@
  *   2 键：方向短=下一个 方向长=上一个   确认短=确定 确认长=返回
  *   3 键：上下短=焦点 上下长=连发       确认短=确定 确认长=返回
  *   4 键：同 3 键 + BACK 短=返回上一层（时钟页=播放/暂停），BACK 长=停止播放
+ *   5 键：确认/上一个/下一个/音量加/音量减（没有返回键）
+ *         —— 确认长按当返回用；时钟页确认短按=播放/暂停；音量键短按调音量、
+ *            长按切下一曲/上一曲
+ *   6 键：5 键 + BACK（返回键独立，确认长按改回"一键"）
+ *
+ * 音量键是"绝对语义"，跟当前在哪个页面、焦点在哪都无关（响铃/绑定向导除外）：
+ *   短按 = 音量 ±5（时钟页顺带把底部音量条亮一下再自动收起）
+ *   长按 = 下一曲 / 上一曲，只切一首，按住不连发
  *
  * "连发"= 按住不放就按 REPEAT_MS 反复触发短按那个动作（键盘连发的手感），
  * 和长按本身绑定在一起，不再像以前那样另做一套"长按调音量 + 弹浮窗"。
@@ -32,7 +40,7 @@ int nav_mode(void)
 {
     int n = keys_bound_count();
     if (n < 1) n = 1;
-    if (n > 4) n = 4;
+    if (n > 6) n = 6;
     return n;
 }
 
@@ -93,11 +101,31 @@ void nav_dispatch(key_role_t role, key_kind_t kind)
         return;
     }
 
-    /* 4 键的 BACK：短=返回上一层（时钟页=播放/暂停），长=停止播放
-       只有真的凑齐 4 键时才这么解释；2/3 键向导里跳步后可能误绑到 BACK，
-       那时它应该退回"方向键"的角色，否则短按会变成返回、焦点动不了。 */
-    if (role == ROLE_BACK && nav_mode() >= 4) {
-        if (kind == KEY_SHORT) nav_back_or_exit_edit();
+    /* 音量键：5/6 键模式专属，语义不随页面/焦点变化。
+       短按调音量（时钟页顺便把底部音量条亮一下，1.5 秒后自己收）；
+       长按切歌，只切一首 —— KEY_REPEAT 直接丢掉，否则按住会一口气跳十几首。 */
+    if (role == ROLE_VOL_UP || role == ROLE_VOL_DOWN) {
+        const bool up = (role == ROLE_VOL_UP);
+
+        if (kind == KEY_SHORT) {
+            /* 走 cmd_vol 而不是 cmd_vol_step：键上印的就是"加/减"，
+               不该被设置里的"反转调节方向"翻过来（那是给方向键用的） */
+            cmd_vol(up ? +CMD_VOL_STEP : -CMD_VOL_STEP);
+            if (page_current() == WAC_PAGE_CLOCK) page_clock_vol_flash();
+        }
+        else if (kind == KEY_LONG) {
+            if (up) cmd_next();
+            else cmd_prev();
+        }
+        return;
+    }
+
+    /* 返回键：只有绑到它才会走到这里（5 键模式明确没有返回）。
+       短=返回上一层（时钟页=播放/暂停），长=停止播放。 */
+    if (role == ROLE_BACK) {
+        if (kind == KEY_SHORT) {
+            nav_back_or_exit_edit();
+        }
         else if (kind == KEY_LONG) {
             WAC_LOG("back long -> stop");
             cmd_stop();
@@ -128,15 +156,26 @@ void nav_dispatch(key_role_t role, key_kind_t kind)
 
         case 3:
         case 4:
+        case 5:
+        case 6:
         default:
             if (role == ROLE_CONFIRM) {
                 if (kind == KEY_SHORT) {
-                    focus_activate();
+                    /* 5/6 键：时钟页的确认键给播放/暂停，不再展开音量条
+                       （音量有独立键，短按就调，条会自己亮一下）。
+                       万一这会儿还在调节态，那一下先当"退出"。 */
+                    if (nav_mode() >= 5 && page_current() == WAC_PAGE_CLOCK) {
+                        if (!focus_exit_edit()) cmd_play_pause();
+                    }
+                    else {
+                        focus_activate();
+                    }
                 }
                 else if (kind == KEY_LONG) {
-                    /* 3 键：确认长按=返回；4 键：确认长按=一键（1key） */
-                    if (nav_mode() == 3) nav_back_or_exit_edit();
-                    else cmd_one_key();
+                    /* 有独立返回键（4/6 键）时，确认长按让位给"一键"；
+                       没有返回键（3/5 键）时长按就当返回 */
+                    if (keys_code_of(ROLE_BACK) >= 0) cmd_one_key();
+                    else nav_back_or_exit_edit();
                 }
             }
             else if (role == ROLE_PREV) {
@@ -154,5 +193,6 @@ void nav_dispatch(key_role_t role, key_kind_t kind)
 void nav_init(void)
 {
     keys_set_callback(nav_dispatch);
-    WAC_LOG("nav: %d-key mode", nav_mode());
+    /* 模式要等 wac_keys.conf 读完才准（main 里在这之后补一条 resolved 日志） */
+    WAC_LOG("nav: dispatch ready");
 }

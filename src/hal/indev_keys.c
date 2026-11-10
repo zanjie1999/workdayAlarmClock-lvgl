@@ -3,11 +3,13 @@
  *
  * 真机：poll 所有 /dev/input/event*，只认绑定表里的 code。
  * 模拟器：用 GetAsyncKeyState 轮询几个键，行为完全一致
- *         Enter/Space=CONFIRM  Up=PREV  Down=NEXT  Esc=BACK
+ *         Enter/Space=CONFIRM  Up=PREV  Down=NEXT  Esc=BACK  小键盘 +/-=音量±
  */
 #include "indev_keys.h"
 
+#include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define DEBOUNCE_MS 30
 #define LONG_MS     600
@@ -31,8 +33,10 @@ static char         s_cfg_path[256] = "wac_keys.conf";
 static char s_last_dev[64];
 static int  s_last_code = -1;
 
-static const char *ROLE_KEY[ROLE_COUNT] = {"", "confirm", "prev", "next", "back"};
-static const char *ROLE_CN[ROLE_COUNT]  = {"", "确定", "上一个", "下一个", "返回"};
+static const char *ROLE_KEY[ROLE_COUNT] = {"",     "confirm", "prev", "next",
+                                           "back", "volup",   "voldown"};
+static const char *ROLE_CN[ROLE_COUNT]  = {"", "确定", "上一个", "下一个", "返回", "音量加",
+                                           "音量减"};
 
 const char *keys_role_name(key_role_t r)
 {
@@ -131,13 +135,21 @@ int keys_load_config(const char *path)
         key_role_t r = key_to_role(k);
         if (r == ROLE_NONE) continue;
 
-        /* 值形如 KEY_POWER:116，取冒号后的数字 */
-        char *colon = strrchr(v, ':');
-        int code = -1;
-        if (colon) code = atoi(colon + 1);
-        else code = atoi(v);
+        /* 值形如 KEY_POWER:116，取冒号后的数字。
+           空值（`prev=` / `back=`）必须当"未绑定"跳过：atoi("") 返回 0，
+           而这里原来判的是 code >= 0，于是空槽全被绑到 code 0 上。
+           后果很隐蔽——只填了 2 个键，加载后却报 4 bound，nav_mode() 跟着
+           变成 4 键模式，长按确认走的是 cmd_one_key() 而不是"返回"。
+           code 0 本身是 KEY_RESERVED，也不是有效按键。 */
+        char *val = v;
+        while (*val == ' ' || *val == '\t') val++;
+        char *colon = strrchr(val, ':');
+        char *num   = colon ? colon + 1 : val;
+        while (*num == ' ' || *num == '\t') num++;
+        if (*num == '\0' || *num == '\n' || *num == '\r') continue;
 
-        if (code >= 0) s_role[r].code = code;
+        int code = atoi(num);
+        if (code > 0) s_role[r].code = code;
     }
     fclose(f);
     WAC_LOG("keys: loaded %s (%d bound)", path, keys_bound_count());
@@ -148,16 +160,29 @@ const char *keys_config_path(void) { return s_cfg_path; }
 
 int keys_save_config(const char *path)
 {
-    snprintf(s_cfg_path, sizeof(s_cfg_path), "%s", path);
-    FILE *f = fopen(path, "w");
-    if (!f) return -1;
+    if (!path) return -1;
+
+    /* path 很可能就是 s_cfg_path 本身 —— 绑定向导收尾时传的是 keys_config_path()。
+       之前这里直接 snprintf(s_cfg_path, sizeof, "%s", path)，目标和源是同一块内存，
+       属于重叠拷贝（未定义行为），实测把路径写坏，fopen 失败后静默返回 -1：
+       于是 wac_keys.conf 从来没落过盘，每次开机都得重走一遍绑定向导。
+       先拷到局部缓冲，彻底避开自引用。 */
+    char target[sizeof(s_cfg_path)];
+    snprintf(target, sizeof(target), "%s", path);
+    memcpy(s_cfg_path, target, sizeof(s_cfg_path));
+
+    FILE *f = fopen(target, "w");
+    if (!f) {
+        WAC_LOG("keys: 写入失败 %s (%s)", target, strerror(errno));
+        return -1;
+    }
     for (int i = 1; i < ROLE_COUNT; i++) {
         if (s_role[i].code >= 0) fprintf(f, "%s=%d\n", ROLE_KEY[i], s_role[i].code);
         else fprintf(f, "%s=\n", ROLE_KEY[i]);
     }
     fprintf(f, "mode=%d\n", keys_bound_count());
     fclose(f);
-    WAC_LOG("keys: saved %s (%d bound)", path, keys_bound_count());
+    WAC_LOG("keys: saved %s (%d bound)", target, keys_bound_count());
     return 0;
 }
 
@@ -210,13 +235,15 @@ typedef struct {
     int  code; /* 虚构的 code，和绑定表一致 */
 } sim_key_t;
 
-/* 用 F1..F4 之外的常见键：回车=确认，↑=上一个，↓=下一个，Esc=返回 */
+/* 用常见键：回车=确认，↑=上一个，↓=下一个，Esc=返回，小键盘 +/-=音量± */
 static const sim_key_t SIM_KEYS[] = {
-    {VK_RETURN, 28},  /* KEY_ENTER */
-    {VK_UP,     103}, /* KEY_UP */
-    {VK_DOWN,   108}, /* KEY_DOWN */
-    {VK_ESCAPE, 158}, /* KEY_BACK */
-    {VK_SPACE,  57},  /* KEY_SPACE */
+    {VK_RETURN,   28},  /* KEY_ENTER */
+    {VK_UP,       103}, /* KEY_UP */
+    {VK_DOWN,     108}, /* KEY_DOWN */
+    {VK_ESCAPE,   158}, /* KEY_BACK */
+    {VK_SPACE,    57},  /* KEY_SPACE */
+    {VK_ADD,      115}, /* KEY_VOLUMEUP */
+    {VK_SUBTRACT, 114}, /* KEY_VOLUMEDOWN */
 };
 
 static void sim_poll(void)
@@ -234,12 +261,34 @@ static void sim_poll(void)
 void keys_init(void)
 {
     keys_clear();
-    /* 模拟器默认 3 键：回车/↑/↓ */
+    /* 默认 4 键（回车/↑/↓/Esc）。WAC_SIM_KEYS=5 或 6 时把小键盘 + / - 也绑成音量键，
+       用来在本机复现 5/6 键模式：
+         5 键 = 确定 / 上 / 下 / 音量加 / 音量减（没有返回）
+         6 键 = 再加上 Esc 返回 */
     keys_bind(ROLE_CONFIRM, 28);
     keys_bind(ROLE_PREV, 103);
     keys_bind(ROLE_NEXT, 108);
-    keys_bind(ROLE_BACK, 158);
-    WAC_LOG("keys: sim mode (Enter/Up/Down/Esc)");
+
+    int want = 4;
+    const char *env = getenv("WAC_SIM_KEYS");
+    if (env && *env) want = atoi(env);
+
+    if (want == 5) {
+        /* 5 键：两个音量键 + 没有返回 */
+        keys_bind(ROLE_VOL_UP, 115);
+        keys_bind(ROLE_VOL_DOWN, 114);
+    }
+    else if (want >= 6) {
+        keys_bind(ROLE_VOL_UP, 115);
+        keys_bind(ROLE_VOL_DOWN, 114);
+        keys_bind(ROLE_BACK, 158);
+    }
+    else {
+        keys_bind(ROLE_BACK, 158); /* 默认 4 键：确定/上/下/返回 */
+    }
+
+    WAC_LOG("keys: sim %d keys (Enter/Up/Down%s%s)", keys_bound_count(),
+            want >= 5 ? "/Num+,-" : "", want >= 6 ? "/Esc" : "");
 }
 
 /* ------------------------------------------------------------- 真机 */
