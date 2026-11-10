@@ -24,6 +24,7 @@ static void chomp(char *s)
 
 static void handle_play_event(void)
 {
+    g_state.state       = WAC_ST_PLAYING; /* 开播即转播放态，Go 只会发 PLAY 不发 RESUME */
     g_state.start_unix  = (int64_t)time(NULL);
     g_state.progress_ms = 0;
     g_state.pos_valid   = false; /* 等 Go 的下一条 POS */
