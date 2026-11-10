@@ -23,6 +23,10 @@
 #include "focus.h"
 #include "swipe.h"
 
+/* 播放键底板：60% 透明（颜色只剩 40% 深度）→ LV_OPA_40。
+ * 透出壁纸但白图标仍压得住；要改回不透明就换 LV_OPA_COVER，改这一处即可。 */
+#define PLAYER_BTN_BG_OPA LV_OPA_40
+
 static lv_obj_t *s_title;
 static lv_obj_t *s_bar;
 static lv_obj_t *s_cursor; /* 时长未知时来回滑的小块 */
@@ -175,7 +179,7 @@ static lv_obj_t *make_button(lv_obj_t *parent, int32_t w, int32_t h, const char 
     lv_obj_remove_style_all(btn);
     lv_obj_set_size(btn, w, h);
     lv_obj_set_style_bg_color(btn, COL_CARD, 0);
-    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_opa(btn, PLAYER_BTN_BG_OPA, 0);
     lv_obj_set_style_radius(btn, h / 4, 0);
     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
 
