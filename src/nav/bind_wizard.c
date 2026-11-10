@@ -38,6 +38,9 @@ static lv_obj_t *s_title;
 static lv_obj_t *s_hint;
 static lv_obj_t *s_dots;
 static lv_obj_t *s_dbg;
+/* 向导的 100ms 轮询定时器。以前 wizard_start() 每次都新建一个、close 时从不删，
+   开机只走一次看不出来；现在设置页能反复点"重新绑定按键"，会越积越多。 */
+static lv_timer_t *s_timer;
 
 static int      s_step;
 static int      s_confirm_code = -1;
@@ -82,6 +85,12 @@ static void wizard_close(void)
     }
 
     keys_set_raw_callback(NULL);
+    /* 先收定时器再删 root：从定时器回调里调过来删自己是安全的
+       （lv_timer 内部有 timer_deleted 守卫） */
+    if (s_timer) {
+        lv_timer_delete(s_timer);
+        s_timer = NULL;
+    }
     if (s_root) lv_obj_delete(s_root);
     s_root   = NULL;
     s_active = false;
@@ -165,6 +174,10 @@ void wizard_start(void)
     lv_obj_set_style_bg_color(s_root, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_root, LV_OPA_COVER, 0);
     lv_obj_remove_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
+    /* 全屏遮罩必须自己吃掉触摸：不加 CLICKABLE 时命中的是下面那一页的控件。
+       从设置页触发时正好压在"关机 / 重启"两行上 —— 向导在跑，底下已经在关机了。
+       （按键和滑动另有 wizard_active() 挡着，见 keymap.c / swipe.c） */
+    lv_obj_add_flag(s_root, LV_OBJ_FLAG_CLICKABLE);
 
     const bool tiny = (g_tk.bp == WAC_BP_TINY);
     int32_t pad = tiny ? 6 : g_tk.pad_lg;
@@ -199,7 +212,7 @@ void wizard_start(void)
     lv_obj_align(s_dots, LV_ALIGN_BOTTOM_MID, 0, -pad);
 
     keys_set_raw_callback(on_raw);
-    lv_timer_create(wizard_timer, 100, NULL);
+    s_timer = lv_timer_create(wizard_timer, 100, NULL);
 
     refresh_ui();
     WAC_LOG("wizard started");

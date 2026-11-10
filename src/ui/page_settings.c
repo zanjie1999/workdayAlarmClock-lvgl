@@ -1,9 +1,11 @@
 /**
  * page_settings.c -- 设置页
  *
- * 一个可上下滚动的列表，条目分两类：
- *   勾选项：显示秒 / 显示电量 / 反转音量方向 / 时间24小时制 （+ 有背光时的亮度条）
- *   动作项：获取IP（向 Go 发 ip）/ 检查更新（向 Go 发 update）/ 关机 / 重启
+ * 一个可上下滚动的列表，条目分三类：
+ *   亮度条：有可调背光时才有，并且排在第一行（最常调的那一项）
+ *   勾选项：显示秒 / 显示电量 / 反转音量方向 / 时间24小时制
+ *   动作项：获取IP（向 Go 发 ip）/ 检查更新（向 Go 发 update）/
+ *           重新绑定按键（删掉绑定表并重走向导）/ 关机 / 重启
  *           —— 前两个发完直接回时钟页，关机和重启则先盖一层提示再执行
  *
  * 勾选框用「方框 + LV_SYMBOL_OK」画，不依赖中文字体里有没有 ☑ / ✓。
@@ -25,12 +27,16 @@
 #include "cmd.h"
 #include "focus.h"
 #include "swipe.h"
+#include "indev_keys.h"
+#include "bind_wizard.h"
 
-#define N_OPT 9
+#define N_OPT 10
 
 /* 方向键一次调多少（触摸拖是连续的，这个只管按键） */
 #define BR_STEP 5
 
+/* id 只当"下标"用（s_row/s_box/s_chk/OPT_TEXT 全按 id 索引），
+   跟屏幕上的先后顺序无关 —— 顺序看下面的 OPT_ORDER。 */
 enum {
     OPT_SECONDS = 0,
     OPT_BATTERY = 1,
@@ -40,12 +46,21 @@ enum {
     OPT_UPDATE  = 5,
     OPT_BRIGHT  = 6,
     OPT_POWEROFF = 7,
-    OPT_REBOOT   = 8
+    OPT_REBOOT   = 8,
+    OPT_REBIND   = 9
 };
 
 static const char *OPT_TEXT[N_OPT] = {"显示秒",       "显示电量", "反转调节方向",
                                       "时间24小时制", "获取IP",   "检查更新",
-                                      "亮度",         "关机",     "重启"};
+                                      "亮度",         "关机",     "重启",
+                                      "重新绑定按键"};
+
+/* 视觉顺序：跟 id 解耦，加条目 / 挪位置只动这一张表。
+   亮度排第一 —— 它是最常调的一项；没有可调背光的板子整行跳过。 */
+static const int OPT_ORDER[] = {
+    OPT_BRIGHT,   OPT_SECONDS, OPT_BATTERY, OPT_VOLREV,   OPT_HOUR24,
+    OPT_IP,       OPT_UPDATE,  OPT_REBIND,  OPT_POWEROFF, OPT_REBOOT,
+};
 
 /* 实际建了哪几行（没有可调背光的板子跳过亮度那行），
    行序 -> 选项下标。以前靠"少建最后一行"偷懒，加了关机这条就不成立了。 */
@@ -79,7 +94,23 @@ static bool *opt_flag(int i)
 
 static bool is_action(int i)
 {
-    return (i == OPT_IP) || (i == OPT_UPDATE) || (i == OPT_POWEROFF) || (i == OPT_REBOOT);
+    return (i == OPT_IP) || (i == OPT_UPDATE) || (i == OPT_REBIND) || (i == OPT_POWEROFF) ||
+           (i == OPT_REBOOT);
+}
+
+/* 动作行右侧的图标：获取IP=WiFi（网络地址）、检查更新=上传（上报版本）、
+   重新绑定按键=键盘、重启=循环刷新、关机=电源。
+   内置符号字体里都有（montserrat 12/14/20 的字形表里，U+F11C 那位就是键盘），
+   别用三元链兜底 —— 以前兜底是电源图标，新加的动作项会被认成"关机"。 */
+static const char *action_icon(int i)
+{
+    switch (i) {
+        case OPT_IP:     return LV_SYMBOL_WIFI;
+        case OPT_UPDATE: return LV_SYMBOL_UPLOAD;
+        case OPT_REBIND: return LV_SYMBOL_KEYBOARD;
+        case OPT_REBOOT: return LV_SYMBOL_REFRESH;
+        default:         return LV_SYMBOL_POWER;
+    }
 }
 
 /* 关机 / 重启：先把提示盖上屏再执行命令。
@@ -135,6 +166,19 @@ static void run_action(int i)
         return;
     }
 
+    /* 重新绑定按键：删掉绑定表再走一遍向导。
+       顺序不能反 —— 向导收尾（wizard_close）在"已经按过第一下"时会顺手
+       keys_save_config()，先起向导后删文件等于把刚删的又写回去。
+       这里也刻意不清内存里的绑定（keys_clear）：向导第 1 步按到键才清，
+       在用户按下第一下之前旧按键仍然可用，半途退出也不会把设备搞成没键可用。
+       不跳页：向导收尾后用户还站在设置页。 */
+    if (i == OPT_REBIND) {
+        keys_remove_config();
+        WAC_LOG("settings: rebind -> bind wizard");
+        wizard_force_start();
+        return;
+    }
+
     const char *cmd = (i == OPT_IP) ? "ip" : "update";
 
     WAC_LOG("settings: send '%s' -> back to clock", cmd);
@@ -175,7 +219,10 @@ static void row_event_cb(lv_event_t *e)
 
     int i = (int)(intptr_t)lv_event_get_user_data(e);
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
-        focus_set_index(i);
+        /* 按对象反查焦点下标。焦点列表是按"行序"排的，而这里的 i 是选项 id：
+           没有可调背光时 s_order 跳过了亮度行，两者差一位 ——
+           拿 id 当 focus_set_index 的下标，点"关机"焦点框会落到"重启"上。 */
+        focus_set_obj(lv_event_get_current_target(e));
         if (is_action(i)) run_action(i);
         else if (i != OPT_BRIGHT) toggle(i);
     }
@@ -429,10 +476,11 @@ static void build(lv_obj_t *root)
     const bool    small = (g_tk.bp == WAC_BP_SMALL);
 
     /* 没有可调背光就不显示亮度条：留一条调不动的滑块只会让人以为坏了。
-       现在关机排在最后，所以不能再用"少建最后一行"来省，改成按行序建。 */
+       行序完全由 OPT_ORDER 决定（亮度在最前），所以不能再靠"少建首/末行"来省。 */
     const bool has_bl = backlight_available();
     s_n_opt           = 0;
-    for (int i = 0; i < N_OPT; i++) {
+    for (int k = 0; k < (int)(sizeof(OPT_ORDER) / sizeof(OPT_ORDER[0])); k++) {
+        const int i = OPT_ORDER[k];
         if (i == OPT_BRIGHT && !has_bl) continue;
         s_order[s_n_opt++] = i;
     }
@@ -507,13 +555,7 @@ static void build(lv_obj_t *root)
                                        : (small ? &lv_font_montserrat_14 : &lv_font_montserrat_20));
         }
         else if (is_action(i)) {
-            /* 图标语义：获取IP=WiFi（网络地址）、检查更新=上传（上报版本）、
-               重启=循环刷新、关机=电源。原先"检查更新"和"重启"的图标是反的。 */
-            const char *icon = (i == OPT_IP)       ? LV_SYMBOL_WIFI
-                               : (i == OPT_UPDATE) ? LV_SYMBOL_UPLOAD
-                               : (i == OPT_REBOOT) ? LV_SYMBOL_REFRESH
-                                                   : LV_SYMBOL_POWER;
-            row = make_action_row(list, i, box, fs, row_h, f_chk, icon);
+            row = make_action_row(list, i, box, fs, row_h, f_chk, action_icon(i));
         }
         else {
             row = make_row(list, i, box, fs, f_chk, row_h);

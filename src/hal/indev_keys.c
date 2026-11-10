@@ -186,7 +186,31 @@ int keys_save_config(const char *path)
     return 0;
 }
 
+/* 删掉绑定表文件。只在设置页的"重新绑定按键"里用。
+   两个刻意的选择：
+     1) 删文件而不是写一张空表 —— 空表还留着文件，keys_load_config() 会返回 0，
+        开机的"没有配置就走向导"判定失效，同时 0 个绑定 → 只剩触摸能用；
+     2) 这里不清内存里的绑定 —— 向导第 1 步按到键才 keys_clear()，
+        在此之前用户的旧按键仍然可用。真在这儿清掉的话，向导半途退出
+        （带触摸的板子 60s 无按键会自动退）会留下一台没有可用按键的设备。 */
+int keys_remove_config(void)
+{
+    /* s_cfg_path 是 keys_load_config() 收到的那条路径（开机就设好了），
+       所以删的一定是"当初读的那一份"，不是 cwd 下的同名文件。 */
+    if (remove(s_cfg_path) == 0) {
+        WAC_LOG("keys: removed %s", s_cfg_path);
+        return 0;
+    }
+    if (errno == ENOENT) {
+        WAC_LOG("keys: %s 不存在，视作已删除", s_cfg_path);
+        return 0;
+    }
+    WAC_LOG("keys: 删除 %s 失败 (%s)", s_cfg_path, strerror(errno));
+    return -1;
+}
+
 /* ------------------------------------------------------------- 事件派发 */
+
 static void emit(key_role_t role, key_kind_t kind)
 {
     if (s_cb) s_cb(role, kind);

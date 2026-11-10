@@ -44,6 +44,11 @@ void keys_init(void);
 int  keys_load_config(const char *path);
 int  keys_save_config(const char *path);
 
+/* 删掉绑定表文件（设置页"重新绑定按键"用）。
+ * 只删文件、不动内存里的绑定 —— 向导第 1 步按到键才 keys_clear()。
+ * 返回 0 成功（文件本来就不在也算成功），-1 失败。 */
+int  keys_remove_config(void);
+
 /* 当前绑定表的路径：就是 keys_load_config 收到的那条（路径没读到文件也记得住）。
  * 绑定向导保存时必须用它，否则会存到 cwd 下的同名文件里，
  * 下次开机按 WAC_KEYS_CONF 又找不到 → 每次开机都重走一遍向导。 */
