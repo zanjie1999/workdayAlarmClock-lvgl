@@ -550,7 +550,7 @@ static void build(lv_obj_t *root)
         const int i = s_order[k];
         lv_obj_t *row;
         if (i == OPT_BRIGHT) {
-            row = make_bright_row(list, fs, tk_pick(6, 8, 10, 12), row_h,
+            row = make_bright_row(list, fs, tk_pick(6, 8, 12, 24), row_h,
                                   tiny ? &lv_font_montserrat_12
                                        : (small ? &lv_font_montserrat_14 : &lv_font_montserrat_20));
         }

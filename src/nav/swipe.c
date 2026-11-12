@@ -12,6 +12,7 @@
 static lv_indev_t *s_ind;
 static lv_point_t  s_org;
 static bool        s_down;
+static bool        s_on_slider; /* 本次按下落在滑块上 */
 static bool        s_consumed; /* 本次按下已被滑动吃掉 */
 static uint32_t    s_fire_tick;
 
@@ -36,7 +37,20 @@ static int32_t swipe_threshold(void)
     return th;
 }
 
-/* 按下点是否落在滑块（或其子对象）上：滑块的拖拽不能被翻页抢走 */
+/* 按下点是否落在滑块（或其子对象）上：滑块的拖拽不能被翻页抢走。
+   不能只看 lv_indev_get_active_obj()：indev 的处理周期比这里的 20ms 轮询慢，
+   快速拖动时按下事件还没轮到，act_obj 还是 NULL，滑动就先翻页了。
+   所以按下沿直接用命中测试把整棵对象树查一遍。 */
+static bool point_on_slider(lv_point_t p)
+{
+    lv_obj_t *o = lv_indev_search_obj(lv_screen_active(), &p);
+    while (o) {
+        if (lv_obj_check_type(o, &lv_slider_class)) return true;
+        o = lv_obj_get_parent(o);
+    }
+    return false;
+}
+
 static bool pressing_slider(void)
 {
     lv_obj_t *o = lv_indev_get_active_obj();
@@ -54,8 +68,9 @@ static void poll_cb(lv_timer_t *t)
 
     bool pressed = (lv_indev_get_state(s_ind) == LV_INDEV_STATE_PRESSED);
     if (!pressed) {
-        s_down     = false;
-        s_consumed = false;
+        s_down      = false;
+        s_consumed  = false;
+        s_on_slider = false;
         return;
     }
 
@@ -74,11 +89,12 @@ static void poll_cb(lv_timer_t *t)
         s_consumed  = false;
         s_fire_tick = 0;
         s_org       = p;
+        s_on_slider = point_on_slider(p);
         return;
     }
     if (s_consumed) return;
     if (lv_indev_get_scroll_obj(s_ind)) return; /* 正在滚列表，让给列表 */
-    if (pressing_slider()) return;              /* 手指按在滑块上，拖拽归滑块 */
+    if (s_on_slider || pressing_slider()) return; /* 手指按在滑块上，拖拽归滑块 */
     if (wizard_active()) return;
 
     int32_t dx = p.x - s_org.x;

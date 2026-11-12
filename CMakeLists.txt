@@ -5,10 +5,10 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 # ---------------------------------------------------------------- 配置项
-# 后端：sim = Windows/GDI 窗口（开发用），fbdev = 真机 /dev/fb0
-set(WAC_BACKEND "sim" CACHE STRING "sim | fbdev")
-# 面板：aku(128x160) | 120x160 | 480x320 | 320x240 | 800x1280 | 1024x600 ...
-set(WAC_PANEL "aku" CACHE STRING "aku | 120x160 | 480x320 | 320x240 | 800x1280 | 1024x600")
+# 后端：sim = Windows/GDI 窗口（开发用），fbdev = 真机 /dev/fb0，drm = 真机 DRM/KMS
+set(WAC_BACKEND "sim" CACHE STRING "sim | fbdev | drm")
+# 面板：aku(128x160) | 120x160 | 480x320 | 320x240 | 480x1280 | 800x1280 | 1024x600 ...
+set(WAC_PANEL "aku" CACHE STRING "aku | 120x160 | 480x320 | 320x240 | 1280x480 | 800x1280 | 1024x600")
 # 旋转角度（对物理面板）：0 | 90 | 180 | 270
 set(WAC_ROT "" CACHE STRING "0|90|180|270，留空则用面板预设")
 # 用 FreeType 直接读 TTF（默认开）。关掉会回落到 LVGL 内置 Montserrat，中文不可见。
@@ -53,6 +53,13 @@ elseif(WAC_PANEL STREQUAL "480x320")
 elseif(WAC_PANEL STREQUAL "320x240")
     set(_pw 320)
     set(_ph 240)
+    set(_rot 0)
+elseif(WAC_PANEL STREQUAL "1280x480")
+    # 作业帮辅导机 / sprd SL8541E（DSI icnl9707）：物理是 1280x480 横屏，
+    # 但 DSI 扫描是转 90° 的 600x1280、可见区只有左边 480 列。
+    # DRM 后端会再把画面顺时针转 90° 铺进扫描缓冲（见 hal/disp_drm.c）。
+    set(_pw 1280)
+    set(_ph 480)
     set(_rot 0)
 elseif(WAC_PANEL STREQUAL "800x1280")
     set(_pw 800)
@@ -102,6 +109,12 @@ get_target_property(_lvgl_srcs lvgl SOURCES)
 list(FILTER _lvgl_srcs EXCLUDE REGEX "\\.S$")
 set_target_properties(lvgl PROPERTIES SOURCES "${_lvgl_srcs}")
 
+# LVGL 的半透明填充（lv_draw_sw_blend_to_rgb565.c 里"一次混两个像素"的快路径）
+# 用了 uint32_t 指针去读写 uint16_t 缓冲区，属于依赖严格别名的写法。zig cc 在
+# armv7 上会把它编成"每列只写一个像素"：带 50% 遮罩时整屏出现隔列条纹。
+# 关掉严格别名优化即可，别去改 LVGL 源码。
+target_compile_options(lvgl PRIVATE -fno-strict-aliasing)
+
 if(WAC_BACKEND STREQUAL "sim")
     target_compile_definitions(lvgl PUBLIC WAC_SIM=1)
 endif()
@@ -111,9 +124,11 @@ endif()
 file(GLOB_RECURSE WAC_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c)
 
 if(WAC_BACKEND STREQUAL "sim")
-    list(FILTER WAC_SRC EXCLUDE REGEX "hal/disp_fbdev\\.c|hal/indev_touch\\.c|proto/go_proc\\.c|proto/state_http\\.c")
+    list(FILTER WAC_SRC EXCLUDE REGEX "hal/disp_fbdev\\.c|hal/disp_drm\\.c|hal/indev_touch\\.c|proto/go_proc\\.c|proto/state_http\\.c")
+elseif(WAC_BACKEND STREQUAL "drm")
+    list(FILTER WAC_SRC EXCLUDE REGEX "hal/disp_sim\\.c|hal/disp_fbdev\\.c|proto/mock_go\\.c")
 else()
-    list(FILTER WAC_SRC EXCLUDE REGEX "hal/disp_sim\\.c|proto/mock_go\\.c")
+    list(FILTER WAC_SRC EXCLUDE REGEX "hal/disp_sim\\.c|hal/disp_drm\\.c|proto/mock_go\\.c")
 endif()
 
 add_executable(wac ${WAC_SRC})
@@ -135,6 +150,9 @@ target_compile_definitions(wac PRIVATE
 )
 if(WAC_BACKEND STREQUAL "sim")
     target_compile_definitions(wac PRIVATE WAC_SIM=1)
+endif()
+if(WAC_BACKEND STREQUAL "drm")
+    target_compile_definitions(wac PRIVATE WAC_DRM=1)
 endif()
 if(WAC_FREETYPE)
     target_compile_definitions(wac PRIVATE WAC_FREETYPE=1)

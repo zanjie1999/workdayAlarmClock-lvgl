@@ -249,4 +249,8 @@ void wac_disp_deinit(void)
     s_fd = -1;
 }
 
+/* fbdev 后端没有 master 之争，投屏交接是空操作 */
+void wac_disp_release(void) {}
+void wac_disp_reclaim(void) {}
+
 #endif /* WAC_SIM */

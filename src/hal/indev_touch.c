@@ -53,6 +53,23 @@ static void remap(void)
     if (s_inv_x) rx = (s_swap ? s_max_y : s_max_x) - rx;
     if (s_inv_y) ry = (s_swap ? s_max_x : s_max_y) - ry;
 
+#if WAC_PANEL_W == 1280 && WAC_PANEL_H == 480
+    /* 作业帮辅导机（sprd SL8541E）：触摸报的是 DSI 扫描坐标 600x1280，
+       物理屏是 1280x480 横屏。disp_drm 把逻辑图顺时针转 90° 铺进扫描缓冲，
+       这里做逆变换：lx = 扫描行 = ty，ly = 479 - 扫描列 = 479 - tx。 */
+    {
+        int tx = (int)((int64_t)rx * WAC_SCR_H / (s_max_x > 0 ? s_max_x : 1));
+        int ty = (int)((int64_t)ry * WAC_SCR_W / (s_max_y > 0 ? s_max_y : 1));
+        if (tx < 0) tx = 0;
+        if (ty < 0) ty = 0;
+        if (tx > WAC_SCR_H - 1) tx = WAC_SCR_H - 1;
+        if (ty > WAC_SCR_W - 1) ty = WAC_SCR_W - 1;
+        s_log_x = ty;
+        s_log_y = (WAC_SCR_H - 1) - tx;
+    }
+    return;
+#endif
+
     /* 原始 → 面板像素 */
     int px = (int)((int64_t)rx * WAC_PANEL_W / (s_max_x > 0 ? s_max_x : 1));
     int py = (int)((int64_t)ry * WAC_PANEL_H / (s_max_y > 0 ? s_max_y : 1));

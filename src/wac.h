@@ -63,6 +63,12 @@ lv_display_t *wac_disp_init(void);
 /* 退出时恢复控制台（fbdev 用：Ctrl-C 后不留花屏） */
 void wac_disp_deinit(void);
 
+/* 投屏交接（Go 的 /fb 流要自己写屏时）：
+   release 把 DRM master 让出去并停掉本进程的推帧，reclaim 收回来重画。
+   非 DRM 后端是空实现。 */
+void wac_disp_release(void);
+void wac_disp_reclaim(void);
+
 
 /* ===== 状态层 ===== */
 /* 没有任何 ECHO 时的默认标题（时钟迷你条 / 播放页共用一份） */

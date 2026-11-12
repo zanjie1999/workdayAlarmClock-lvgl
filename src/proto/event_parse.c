@@ -120,10 +120,14 @@ void event_handle_line(const char *line)
     /* Go 的 /fb 投屏长连接：整屏交给它，LVGL 一帧都别再写 */
     else if (strcmp(buf, "FBSTART") == 0) {
         WAC_LOG("go: fb stream start -> lvgl output paused");
+        /* 先把 DRM master 让出去：Go 的 Open() 紧跟着就要抢，慢一步它就退回
+           /dev/fb0 了（那个 buffer 不在扫描输出上，画面根本不出来）。 */
+        wac_disp_release();
         ui_pause_set(true);
     }
     else if (strcmp(buf, "FBEND") == 0) {
         WAC_LOG("go: fb stream end -> lvgl output resumed");
+        wac_disp_reclaim();
         ui_pause_set(false);
     }
     else if (starts_with(buf, "DUR ")) {

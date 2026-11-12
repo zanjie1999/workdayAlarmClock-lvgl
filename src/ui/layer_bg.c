@@ -308,6 +308,17 @@ static void bg_restack(void)
 
 /* 遮罩只用来压暗壁纸。纯黑底上盖 50% 黑没有任何视觉效果，
    却要每帧多合成一层，所以没有壁纸时干脆不建。 */
+/* 遮罩浓度默认 WAC_MASK_OPA；WAC_MASK_OPA 环境变量可临时改（调试/对比用） */
+static lv_opa_t mask_opa(void)
+{
+    const char *e = getenv("WAC_MASK_OPA");
+    if (e && *e) {
+        int v = atoi(e);
+        if (v >= 0 && v <= 255) return (lv_opa_t)v;
+    }
+    return WAC_MASK_OPA;
+}
+
 static void bg_mask_sync(void)
 {
     if (s_wall && !s_mask) {
@@ -316,7 +327,7 @@ static void bg_mask_sync(void)
         lv_obj_set_size(s_mask, WAC_SCR_W, WAC_SCR_H);
         lv_obj_set_pos(s_mask, 0, 0);
         lv_obj_set_style_bg_color(s_mask, lv_color_black(), 0);
-        lv_obj_set_style_bg_opa(s_mask, WAC_MASK_OPA, 0);
+        lv_obj_set_style_bg_opa(s_mask, mask_opa(), 0);
         lv_obj_remove_flag(s_mask, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_remove_flag(s_mask, LV_OBJ_FLAG_CLICKABLE);
     }
