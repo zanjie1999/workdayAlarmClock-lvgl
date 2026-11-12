@@ -126,3 +126,49 @@ jobs:
           name: wac-rns-mips
           path: build-rns/wac
           if-no-files-found: error
+
+  # ---------------------------------------------------------------- 作业帮辅导机
+  # Unisoc SL8541E（armv7 / musl 静态）。DSI 扫描缓冲是 600x1280，可视区只有中间
+  # 480 列，逻辑上是 1280x480 横屏 —— 所以走 drm 后端（fbdev 那条路画不进去）。
+  gofu:
+    name: gofu (armv7 / musl static / drm / 1280x480)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Configure
+        run: |
+          set -eux
+          export WAC_ZIG="$(command -v zig)"
+          cmake -S . -B build-gofu -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWAC_BACKEND=drm \
+            -DWAC_PANEL=1280x480 \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-arm-musl.cmake
+
+      - name: Build
+        run: cmake --build build-gofu -j"$(nproc)"
+
+      - name: Check
+        run: |
+          set -eux
+          file build-gofu/wac
+          ls -l build-gofu/wac
+          if readelf -l build-gofu/wac 2>/dev/null | grep -q INTERP; then
+            echo "::error::wac 不是静态链接"
+            exit 1
+          fi
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: wac-gofu-armv7
+          path: build-gofu/wac
+          if-no-files-found: error

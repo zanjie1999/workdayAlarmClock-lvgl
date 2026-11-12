@@ -12,7 +12,7 @@
 | `assets/fonts/` | 运行时读的 TTF（中文用 `wac_cjk.ttf`，时钟数字用 `zyymeclock.ttf`） |
 | `cmake/toolchain-*.cmake` | ARM / MIPS 的 musl 静态工具链（走 Zig，见下） |
 | `scripts/` | 上板用的启动 / 部署脚本 |
-| `.github/workflows/build.yml` | CI：出 ARM（aku）和 MIPS（rns）两个静态可执行文件 |
+| `.github/workflows/build.yml` | CI：出 ARM（aku / gofu）和 MIPS（rns）三个静态可执行文件 |
 
 ## 拉代码
 
@@ -63,6 +63,7 @@ cmake --build build-arm
 |---|---|
 | `wac-aku-armv7` | aku（sun5i / ARMv7，fbdev 128×160 转 90°） |
 | `wac-rns-mips` | rns 音箱（mipsel / MIPS，fbdev **480×320 横屏不旋转**） |
+| `wac-gofu-armv7` | 作业帮辅导机（SL8541E / ARMv7，**DRM 1280×480**，扫描缓冲 600×1280） |
 
 两个都是**静态链接**的单个可执行文件（CI 里有 `readelf` 断言，出现 `INTERP` 段就判失败），
 下载下来解压直接就是 `wac`，不用装任何运行库。Release 包链接时带 `-s`，
@@ -107,6 +108,25 @@ rns 上没推雅黑，会自动落到 `/usr/share/fonts/Reeji-CloudKaiTi-GB.ttf`
 日志里能看到 `font: cjk = ...` 选的到底是哪个。
 
 LVGL壳需要手动更新，工作咩闹钟本身会自动更新
+
+## 作业帮辅导机（1280×480 DRM）
+
+这块屏的 DSI 扫描缓冲是 **600×1280**，物理上只有中间 480 列可见，逻辑上是 1280×480 横屏，
+系统里没有 fb 刷新（weston 已停掉），所以走 `drm` 后端：两个 dumb buffer + `SETCRTC` +
+page flip，XRGB8888，`flush` 时按 90° 旋转拷贝。
+
+```sh
+cmake -S . -B build-gofu -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DWAC_BACKEND=drm -DWAC_PANEL=1280x480 \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-arm-musl.cmake
+cmake --build build-gofu
+```
+
+设备上是 `/home/root/workdayAlarmClock`：`wac` 放 `lvgl/`，`scripts/start-zyb.sh` 推过去当
+`start.sh` 用（里面 `FB_WIDTH=480 FB_HEIGHT=1280`，Go 靠它决定 `/fb` 收图尺寸，最后 `setsid ./lvgl/wac`）。
+壁纸用 `python scripts/make_wallpaper.py 图 --screen 1280x480`，产物放 `wallpapers/bg_1280x480.raw`。
+
+投屏（Go 的 `/fb` 流）时外壳收到 `FBSTART` 让出 DRM master，`FBEND` 再收回重画，两边不抢屏。
 
 ## 关掉 rns 音箱自带的小度（保留联网 + 蓝牙音箱）
 
