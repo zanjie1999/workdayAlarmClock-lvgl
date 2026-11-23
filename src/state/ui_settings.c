@@ -39,7 +39,7 @@ void ui_set_load(const char *path)
             else if (!strcmp(key, "vol_reverse"))  g_set.vol_reverse = (val != 0);
             else if (!strcmp(key, "hour24"))       g_set.hour24 = (val != 0);
             else if (!strcmp(key, "brightness")) {
-                if (val < 10) val = 10;
+                if (val < 1) val = 1;
                 if (val > 100) val = 100;
                 g_set.brightness = val;
             }
