@@ -11,11 +11,11 @@
 #include "wac.h"
 
 /* 最低亮度：再暗就什么都看不见了，也留个"还活着"的反馈 */
-#define WAC_BRIGHT_MIN 10
+#define WAC_BRIGHT_MIN 1
 
 void ui_bright_init(void);
 
-/* pct = 10..100。会同步 g_set.brightness 并调硬件背光（如果有） */
+/* pct = 1..100。会同步 g_set.brightness 并调硬件背光（如果有） */
 void ui_bright_set(int pct);
 
 #endif /* WAC_UI_BRIGHT_H */
